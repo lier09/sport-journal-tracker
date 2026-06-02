@@ -1,0 +1,34 @@
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local environment / secrets
+.env
+.env.*
+.streamlit/secrets.toml
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log
+
+# Keep deployment database
+!data/
+!data/journal_tracker.db
+__pycache__/
+*.pyc
+.data/
+data/*.db
+reports/daily/*.xlsx
+reports/daily/*.docx
+reports/weekly/*.xlsx
+reports/weekly/*.docx

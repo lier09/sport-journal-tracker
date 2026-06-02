@@ -1,0 +1,11 @@
+{
+  "hyperbaric_oxygen_hyperoxia": ["hyperbaric oxygen", "HBOT", "hyperoxia", "oxygen therapy", "normobaric oxygen", "oxygen exposure", "oxygen supplementation"],
+  "hypoxia_altitude": ["hypoxia", "altitude", "hypoxic", "high altitude", "intermittent hypoxia", "RSH", "repeated sprint training in hypoxia", "altitude training", "acclimatization", "acute mountain sickness", "AMS"],
+  "exercise_recovery_fatigue": ["recovery", "fatigue", "muscle damage", "lactate", "delayed onset muscle soreness", "DOMS", "heart rate recovery", "HRV", "autonomic", "inflammation", "cytokine"],
+  "exercise_physiology_performance": ["VO2max", "VO2 peak", "maximal oxygen uptake", "anaerobic", "sprint", "endurance", "threshold", "time trial", "performance", "training adaptation", "interval training", "HIIT", "SIT"],
+  "sports_nutrition_metabolism": ["nutrition", "protein", "carbohydrate", "supplement", "hydration", "caffeine", "creatine", "metabolism", "metabolic", "glycogen", "energy availability"],
+  "metabolomics_omics": ["metabolomics", "proteomics", "transcriptomics", "lipidomics", "LC-MS", "GC-MS", "biomarker", "pathway", "multi-omics", "omics"],
+  "biomechanics_neuromuscular": ["biomechanics", "gait", "posture", "EMG", "electromyography", "kinematics", "kinetics", "neuromuscular", "motor control"],
+  "injury_rehabilitation": ["injury", "rehabilitation", "physical therapy", "orthopaedic", "arthroscopy", "return to sport", "tendon", "ligament", "ACL", "shoulder", "knee"],
+  "ai_wearable_modeling": ["machine learning", "artificial intelligence", "deep learning", "wearable", "sensor", "prediction", "model", "algorithm", "digital health"]
+}

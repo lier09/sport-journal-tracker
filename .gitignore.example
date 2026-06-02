@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Local environment / secrets
+.env
+.env.*
+.streamlit/secrets.toml
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log
+
+# 重要：如果使用 GitHub Actions -> Streamlit Cloud 同步，
+# data/journal_tracker.db 必须上传到 GitHub。
+# 如果你的旧 .gitignore 里有 data/ 或 *.db，请删除或在末尾加：
+!data/
+!data/journal_tracker.db

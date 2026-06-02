@@ -1,0 +1,58 @@
+name: Daily Journal Update
+
+on:
+  schedule:
+    # UTC 00:10 = 北京时间 08:10；GitHub Actions 的 cron 使用 UTC。
+    - cron: "10 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: journal-tracker-daily-update
+  cancel-in-progress: false
+
+jobs:
+  update-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Initialize database schema
+        run: python -m src.main init-db
+
+      - name: Run daily journal update
+        # 如果 Crossref 不稳定，可改为：--sources pubmed
+        run: python -m src.main run-daily --days-back 3 --sources pubmed crossref --report
+
+      - name: Commit updated database and reports
+        run: |
+          git config user.name "journal-tracker-bot"
+          git config user.email "journal-tracker-bot@users.noreply.github.com"
+
+          git add data/journal_tracker.db
+          git add reports/daily || true
+
+          if git diff --cached --quiet; then
+            echo "No database/report changes to commit."
+          else
+            git commit -m "Daily journal update"
+            git push
+          fi

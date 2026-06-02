@@ -128,6 +128,10 @@ def main() -> None:
     wr = sub.add_parser("make-weekly-report", help="Generate weekly report from database")
     wr.add_argument("--end-day", default=None, help="YYYY-MM-DD; defaults to today")
 
+    enrich = sub.add_parser("enrich-abstracts", help="Fill missing abstracts from PubMed when PMID/DOI is available")
+    enrich.add_argument("--limit", type=int, default=100, help="Maximum number of missing-abstract records to process")
+    enrich.add_argument("--batch-size", type=int, default=20, help="PubMed efetch batch size")
+
     sub.add_parser("stats", help="Show database stats")
 
     args = parser.parse_args()
@@ -147,6 +151,15 @@ def main() -> None:
         from .reports import make_weekly_report
         xlsx, docx = make_weekly_report(args.end_day)
         print(f"Weekly reports: {xlsx}, {docx}")
+    elif args.command == "enrich-abstracts":
+        from .enrich_pubmed import enrich_abstracts
+        result = enrich_abstracts(limit=args.limit, batch_size=args.batch_size)
+        print("Abstract enrichment completed.")
+        print(f"Checked records: {result['checked']}")
+        print(f"PMIDs resolved by DOI: {result.get('pmids_resolved_by_doi', 0)}")
+        print(f"PMIDs resolved by title: {result.get('pmids_resolved_by_title', 0)}")
+        print(f"PubMed records found: {result['pubmed_records_found']}")
+        print(f"Abstracts filled/confirmed: {result['abstracts_filled_or_confirmed']}")
     elif args.command == "stats":
         stats()
 

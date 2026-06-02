@@ -16,7 +16,7 @@ concurrency:
 jobs:
   update-database:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
 
     steps:
       - name: Checkout repository
@@ -41,6 +41,11 @@ jobs:
       - name: Run daily journal update
         # 如果 Crossref 不稳定，可改为：--sources pubmed
         run: python -m src.main run-daily --days-back 3 --sources pubmed crossref --report
+
+      - name: Enrich missing abstracts from PubMed
+        # Best-effort enrichment. It only fills official PubMed metadata and does not generate AI summaries.
+        run: python -m src.main enrich-abstracts --limit 120 --batch-size 20
+        continue-on-error: true
 
       - name: Commit updated database and reports
         run: |

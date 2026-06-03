@@ -7,6 +7,7 @@ env/
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
 
 # Local environment / secrets
 .env
@@ -24,11 +25,6 @@ logs/
 # Keep deployment database
 !data/
 !data/journal_tracker.db
-
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
 
 # Reports
 reports/daily/*.xlsx

@@ -527,6 +527,65 @@ hr {
   color:#B45309;
 }
 
+
+/* v4.9 restore original visual style + stable card rendering */
+.stApp {
+  background: linear-gradient(180deg, #F8FAFC 0%, #EEF4FB 100%);
+}
+.journal-card-fixed, .topic-card-fixed {
+  border: 1px solid rgba(15,23,42,.08);
+  border-radius: 22px;
+  padding: 18px 20px;
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.92));
+  box-shadow: 0 14px 32px rgba(15,23,42,.055);
+  min-height: 168px;
+  margin-bottom: 14px;
+}
+.journal-card-fixed-title {
+  font-weight: 850;
+  color: #0F172A;
+  line-height: 1.38;
+  font-size: 1.04rem;
+  margin-bottom: 12px;
+}
+.journal-card-fixed-domain {
+  color:#64748B;
+  font-size:.84rem;
+  line-height:1.55;
+  margin-top: 12px;
+  word-break: break-word;
+}
+.metric-row-fixed {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top: 8px;
+}
+.metric-pill-fixed {
+  display:inline-flex;
+  align-items:center;
+  border-radius:999px;
+  padding:5px 10px;
+  font-size:.78rem;
+  font-weight:720;
+  border:1px solid rgba(37,99,235,.14);
+  background:rgba(37,99,235,.07);
+  color:#1D4ED8;
+}
+.focus-pill-fixed {
+  display:inline-flex;
+  align-items:center;
+  border-radius:999px;
+  padding:5px 10px;
+  font-size:.78rem;
+  font-weight:720;
+  border:1px solid rgba(234,179,8,.24);
+  background:rgba(254,249,195,.74);
+  color:#A16207;
+}
+.topic-card-fixed-title { font-weight:850; color:#4C1D95; margin-bottom:8px; }
+.topic-card-fixed-number { font-size:2rem; font-weight:900; color:#0F172A; letter-spacing:-.04em; }
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -922,6 +981,7 @@ def render_journal_center(day_df: pd.DataFrame, trend_df: pd.DataFrame, journals
     if journals_df.empty:
         render_empty("暂无期刊配置。")
         return
+
     last7_start = (date.today() - timedelta(days=6)).isoformat()
     last7 = trend_df[trend_df["first_seen_date"] >= last7_start] if not trend_df.empty else trend_df
     day_counts = day_df.groupby("journal_name").size().to_dict() if not day_df.empty else {}
@@ -943,23 +1003,25 @@ def render_journal_center(day_df: pd.DataFrame, trend_df: pd.DataFrame, journals
         render_empty("当前日期和趋势范围内没有期刊更新。")
         return
 
-    html_cards = ['<div class="journal-grid">']
-    for is_focus, d, w, t, name, domain in cards:
-        focus_badge = '<span class="focus-pill">⭐ 重点关注</span>' if is_focus else ''
-        html_cards.append(
-            f'''<div class="journal-card">
-                  <div class="journal-card-title">🏛️ {esc(name)}</div>
-                  <div class="journal-card-stats">
-                    <span class="stat-pill">今日 {d}</span>
-                    <span class="stat-pill">近7日 {w}</span>
-                    <span class="stat-pill">趋势范围 {t}</span>
-                    {focus_badge}
-                  </div>
-                  <div class="small-muted" style="margin-top:10px;">{esc(domain or "未配置方向")}</div>
-                </div>'''
-        )
-    html_cards.append("</div>")
-    st.markdown("\n".join(html_cards), unsafe_allow_html=True)
+    # Use Streamlit columns + single-line HTML cards to avoid Markdown treating indented HTML as code blocks.
+    for i in range(0, len(cards), 3):
+        cols = st.columns(3)
+        for col, item in zip(cols, cards[i:i + 3]):
+            is_focus, d, w, t, name, domain = item
+            focus_badge = '<span class="focus-pill-fixed">⭐ 重点关注</span>' if is_focus else ''
+            html_card = (
+                f'<div class="journal-card-fixed">'
+                f'<div class="journal-card-fixed-title">📚 {esc(name)}</div>'
+                f'<div class="metric-row-fixed">'
+                f'<span class="metric-pill-fixed">今日 {d}</span>'
+                f'<span class="metric-pill-fixed">近7日 {w}</span>'
+                f'<span class="metric-pill-fixed">趋势范围 {t}</span>'
+                f'{focus_badge}'
+                f'</div>'
+                f'<div class="journal-card-fixed-domain">{esc(domain or "未配置方向")}</div>'
+                f'</div>'
+            )
+            col.markdown(html_card, unsafe_allow_html=True)
 
 def render_topic_center(df: pd.DataFrame, trend_df: pd.DataFrame) -> None:
     st.markdown('<div class="section-title">🏷 专题中心</div>', unsafe_allow_html=True)
@@ -969,21 +1031,21 @@ def render_topic_center(df: pd.DataFrame, trend_df: pd.DataFrame) -> None:
         return
     counts = topic_counts(df)
     trend_counts = topic_counts(trend_df) if not trend_df.empty else pd.Series(dtype=int)
-    html_cards = ['<div class="topic-grid">']
-    for topic, count in counts.head(16).items():
-        tcount = int(trend_counts.get(topic, 0)) if len(trend_counts) else 0
-        html_cards.append(
-            f'''<div class="topic-card">
-                  <div class="topic-title">🏷 {esc(topic)}</div>
-                  <div class="topic-number">{int(count)}</div>
-                  <div class="small-muted">所选日期命中</div>
-                  <div style="margin-top:8px;"><span class="stat-pill">趋势范围 {tcount}</span></div>
-                </div>'''
-        )
-    html_cards.append("</div>")
-    st.markdown("\n".join(html_cards), unsafe_allow_html=True)
 
-
+    topic_items = list(counts.head(16).items())
+    for i in range(0, len(topic_items), 4):
+        cols = st.columns(4)
+        for col, (topic, count) in zip(cols, topic_items[i:i + 4]):
+            tcount = int(trend_counts.get(topic, 0)) if len(trend_counts) else 0
+            html_card = (
+                f'<div class="topic-card-fixed">'
+                f'<div class="topic-card-fixed-title">🏷 {esc(topic)}</div>'
+                f'<div class="topic-card-fixed-number">{int(count)}</div>'
+                f'<div class="small-muted">所选日期命中</div>'
+                f'<div style="margin-top:8px;"><span class="metric-pill-fixed">趋势范围 {tcount}</span></div>'
+                f'</div>'
+            )
+            col.markdown(html_card, unsafe_allow_html=True)
 
 def render_focus_center(day_df: pd.DataFrame, trend_df: pd.DataFrame, journals_df: pd.DataFrame, focus_journals: list[str]) -> None:
     st.markdown('<div class="section-title">🎯 重点关注期刊</div>', unsafe_allow_html=True)

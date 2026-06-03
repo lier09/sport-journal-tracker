@@ -506,6 +506,27 @@ hr {
   .detail-grid { grid-template-columns: 1fr 1fr; }
 }
 
+
+.focus-note {
+  border: 1px solid rgba(245,158,11,.18);
+  background: linear-gradient(180deg, rgba(255,251,235,.9), rgba(255,255,255,.92));
+  border-radius: 18px;
+  padding: 12px 14px;
+  color: #92400E;
+  font-size: .82rem;
+  line-height: 1.55;
+  margin: 8px 0 12px;
+}
+.focus-pill {
+  border-radius:999px;
+  padding:4px 9px;
+  font-size:.75rem;
+  font-weight:760;
+  border:1px solid rgba(245,158,11,.22);
+  background:rgba(245,158,11,.10);
+  color:#B45309;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -687,12 +708,14 @@ def normalize_article_df(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def apply_filters(df: pd.DataFrame, *, selected_journal: str, priorities, statuses, topics, keyword, favorites_only, topic_only) -> pd.DataFrame:
+def apply_filters(df: pd.DataFrame, *, selected_journal: str, priorities=None, statuses=None, topics=None, keyword="", favorites_only=False, topic_only=False, focus_journals=None, focus_only=False) -> pd.DataFrame:
     out = df.copy()
     if out.empty:
         return out
     if selected_journal and selected_journal != "全部期刊":
         out = out[out["journal_name"] == selected_journal]
+    if focus_only and focus_journals:
+        out = out[out["journal_name"].isin(focus_journals)]
     if priorities:
         out = out[out["priority"].fillna("").isin(priorities)]
     if statuses:
@@ -887,9 +910,15 @@ def render_product_tiles() -> None:
     )
 
 
-def render_journal_center(day_df: pd.DataFrame, trend_df: pd.DataFrame, journals_df: pd.DataFrame) -> None:
+def render_journal_center(day_df: pd.DataFrame, trend_df: pd.DataFrame, journals_df: pd.DataFrame, focus_journals: list[str] | None = None) -> None:
+    focus_journals = focus_journals or []
     st.markdown('<div class="section-title">📚 期刊中心</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-subtitle">按期刊查看今日、近 7 日与当前趋势范围的更新强度。</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-subtitle">按期刊查看今日、近 7 日与当前趋势范围的更新强度；可在左侧自定义重点关注期刊。</div>', unsafe_allow_html=True)
+    if focus_journals:
+        st.markdown(
+            f'<div class="focus-note">⭐ 当前已设置 {len(focus_journals)} 本重点关注期刊。重点关注只影响你的当前浏览会话，不会改动公共数据库。</div>',
+            unsafe_allow_html=True,
+        )
     if journals_df.empty:
         render_empty("暂无期刊配置。")
         return
@@ -905,32 +934,32 @@ def render_journal_center(day_df: pd.DataFrame, trend_df: pd.DataFrame, journals
         d = int(day_counts.get(name, 0))
         w = int(week_counts.get(name, 0))
         t = int(trend_counts.get(name, 0))
-        if d == 0 and w == 0 and t == 0:
+        if d == 0 and w == 0 and t == 0 and name not in focus_journals:
             continue
-        cards.append((d, w, t, name, jr.get("priority", ""), jr.get("domain", "")))
-    cards = sorted(cards, key=lambda x: (x[0], x[1], x[2], x[3]), reverse=True)[:36]
+        cards.append((1 if name in focus_journals else 0, d, w, t, name, jr.get("domain", "")))
+    cards = sorted(cards, key=lambda x: (x[0], x[1], x[2], x[3], x[4]), reverse=True)[:48]
 
     if not cards:
         render_empty("当前日期和趋势范围内没有期刊更新。")
         return
 
     html_cards = ['<div class="journal-grid">']
-    for d, w, t, name, priority, domain in cards:
+    for is_focus, d, w, t, name, domain in cards:
+        focus_badge = '<span class="focus-pill">⭐ 重点关注</span>' if is_focus else ''
         html_cards.append(
             f'''<div class="journal-card">
-                  <div class="journal-card-title">📚 {esc(name)}</div>
+                  <div class="journal-card-title">🏛️ {esc(name)}</div>
                   <div class="journal-card-stats">
                     <span class="stat-pill">今日 {d}</span>
                     <span class="stat-pill">近7日 {w}</span>
                     <span class="stat-pill">趋势范围 {t}</span>
-                    <span class="stat-pill">优先级 {esc(priority or "-")}</span>
+                    {focus_badge}
                   </div>
                   <div class="small-muted" style="margin-top:10px;">{esc(domain or "未配置方向")}</div>
                 </div>'''
         )
     html_cards.append("</div>")
     st.markdown("\n".join(html_cards), unsafe_allow_html=True)
-
 
 def render_topic_center(df: pd.DataFrame, trend_df: pd.DataFrame) -> None:
     st.markdown('<div class="section-title">🏷 专题中心</div>', unsafe_allow_html=True)
@@ -953,6 +982,23 @@ def render_topic_center(df: pd.DataFrame, trend_df: pd.DataFrame) -> None:
         )
     html_cards.append("</div>")
     st.markdown("\n".join(html_cards), unsafe_allow_html=True)
+
+
+
+def render_focus_center(day_df: pd.DataFrame, trend_df: pd.DataFrame, journals_df: pd.DataFrame, focus_journals: list[str]) -> None:
+    st.markdown('<div class="section-title">🎯 重点关注期刊</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-subtitle">由用户在左侧自行选择。本功能用于当前浏览会话的个性化查看，不写入公共数据库。</div>', unsafe_allow_html=True)
+    if not focus_journals:
+        render_empty("你还没有设置重点关注期刊。请在左侧『重点关注期刊』中选择若干期刊。")
+        return
+    focus_day = day_df[day_df["journal_name"].isin(focus_journals)] if not day_df.empty else day_df
+    focus_trend = trend_df[trend_df["journal_name"].isin(focus_journals)] if not trend_df.empty else trend_df
+    render_journal_center(focus_day, focus_trend, journals_df[journals_df["journal_name"].isin(focus_journals)], focus_journals=focus_journals)
+    st.markdown('<div class="section-title">📰 重点关注期刊的所选日期更新</div>', unsafe_allow_html=True)
+    if focus_day.empty:
+        render_empty("所选日期下，重点关注期刊暂无更新论文。")
+    else:
+        render_by_journal(focus_day, key_prefix="focus_journals")
 
 
 def render_export_center(df: pd.DataFrame, selected_date: date) -> None:
@@ -1017,7 +1063,7 @@ with st.sidebar:
 
     page = st.radio(
         "导航",
-        ["🏠 首页总览", "📰 今日更新", "🗓 日期检索", "📚 期刊中心", "🏷 专题中心", "⬇️ 导出中心", "⭐ 阅读管理", "⚙️ 系统状态"],
+        ["🏠 首页总览", "📰 今日更新", "🗓 日期检索", "📚 期刊中心", "🎯 重点关注", "🏷 专题中心", "⬇️ 导出中心", "⭐ 阅读管理", "⚙️ 系统状态"],
         label_visibility="collapsed",
     )
 
@@ -1054,8 +1100,20 @@ with st.sidebar:
     selected_journal = journal_label_map.get(selected_journal_label, "全部期刊")
 
     st.markdown('<div class="soft-divider"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-title">🎯 重点关注期刊</div>', unsafe_allow_html=True)
+    focus_journals = st.multiselect(
+        "选择你重点关注的期刊",
+        journal_names,
+        default=st.session_state.get("focus_journals", []),
+        placeholder="输入期刊名检索并选择",
+        help="该选择只保存在当前浏览会话中，不会影响其他访问者。",
+    )
+    st.session_state.focus_journals = focus_journals
+    focus_only = st.checkbox("仅显示重点关注期刊", value=False, disabled=(len(focus_journals) == 0))
+
+    st.markdown('<div class="soft-divider"></div>', unsafe_allow_html=True)
     st.markdown('<div class="sidebar-title">🔎 筛选器</div>', unsafe_allow_html=True)
-    priorities = st.multiselect("期刊优先级", ["S", "A", "B", "C"], default=["S", "A", "B", "C"])
+    priorities = []
     all_topics = load_all_topics()
     selected_topics = st.multiselect("专题标签", all_topics, default=[])
     statuses = st.multiselect("阅读状态", READING_STATUS, default=[])
@@ -1081,6 +1139,8 @@ display_df = apply_filters(
     keyword=keyword,
     favorites_only=favorites_only,
     topic_only=topic_only,
+    focus_journals=focus_journals,
+    focus_only=focus_only,
 )
 
 trend_filtered = apply_filters(
@@ -1092,6 +1152,8 @@ trend_filtered = apply_filters(
     keyword="",
     favorites_only=False,
     topic_only=False,
+    focus_journals=focus_journals,
+    focus_only=focus_only,
 )
 
 today_df = load_articles(date.today().isoformat(), date.today().isoformat())
@@ -1104,6 +1166,8 @@ today_filtered = apply_filters(
     keyword="",
     favorites_only=False,
     topic_only=False,
+    focus_journals=focus_journals,
+    focus_only=focus_only,
 )
 
 st.markdown(
@@ -1131,9 +1195,10 @@ with k3:
 with k4:
     kpi("🏷", int(display_df["has_topic"].sum()) if not display_df.empty else 0, "专题命中", "基于关键词词库")
 with k5:
-    kpi("⭐", int(display_df["favorite"].sum()) if not display_df.empty else 0, "收藏", "当前筛选范围")
+    kpi("🎯", len(focus_journals), "重点关注", "当前会话自定义")
 
-st.caption(f"当前查看范围：{selected_date.isoformat()}｜{selected_journal}")
+focus_note = f"｜重点关注 {len(focus_journals)} 本" if focus_journals else ""
+st.caption(f"当前查看范围：{selected_date.isoformat()}｜{selected_journal}{focus_note}")
 
 export_cols = [
     "first_seen_date", "publication_date", "journal_name", "priority", "title", "authors", "doi", "url",
@@ -1168,7 +1233,7 @@ if page == "🏠 首页总览":
             light_bar_chart(top_j, x_title="期刊", y_title="更新论文数")
 
     st.markdown('<div class="section-title">🧭 期刊活跃概览</div>', unsafe_allow_html=True)
-    render_journal_center(display_df, trend_filtered, journals_df)
+    render_journal_center(display_df, trend_filtered, journals_df, focus_journals=focus_journals)
     st.markdown('<div class="section-title">📰 所选日期更新论文</div>', unsafe_allow_html=True)
     view_mode = st.radio("展示方式", ["卡片", "按期刊", "按主题"], horizontal=True, label_visibility="collapsed")
     if view_mode == "卡片":
@@ -1204,13 +1269,16 @@ elif page == "🗓 日期检索":
         render_by_topic(display_df, key_prefix="date_topic")
 
 elif page == "📚 期刊中心":
-    render_journal_center(display_df, trend_filtered, journals_df)
+    render_journal_center(display_df, trend_filtered, journals_df, focus_journals=focus_journals)
     st.markdown('<div class="section-title">📚 当前选择期刊的更新论文</div>', unsafe_allow_html=True)
     if selected_journal == "全部期刊":
         st.info("可在左侧点击具体期刊，查看单本期刊在所选日期的更新论文。")
         render_by_journal(display_df, key_prefix="journal_center_all")
     else:
         render_article_cards(display_df, key_prefix="journal_center_cards")
+
+elif page == "🎯 重点关注":
+    render_focus_center(selected_raw, trend_raw, journals_df, focus_journals)
 
 elif page == "🏷 专题中心":
     render_topic_center(display_df, trend_filtered)
@@ -1232,7 +1300,7 @@ elif page == "⭐ 阅读管理":
     st.markdown('<div class="section-title">⭐ 收藏 / 待读 / 精读管理</div>', unsafe_allow_html=True)
     st.caption("公开部署版中，阅读状态、收藏和备注属于公共字段；多人使用时建议谨慎修改。")
     read_df = trend_raw[(trend_raw["favorite"] == 1) | (trend_raw["status"].isin(["待读", "阅读中", "精读", "已引用"]))].copy()
-    read_df = apply_filters(read_df, selected_journal=selected_journal, priorities=priorities, statuses=statuses, topics=selected_topics, keyword=keyword, favorites_only=False, topic_only=False)
+    read_df = apply_filters(read_df, selected_journal=selected_journal, priorities=priorities, statuses=statuses, topics=selected_topics, keyword=keyword, favorites_only=False, topic_only=False, focus_journals=focus_journals, focus_only=focus_only)
     if read_df.empty:
         render_empty("当前趋势范围内还没有收藏或待读/精读论文。")
     else:

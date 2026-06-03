@@ -24,10 +24,13 @@ logs/
 # Keep deployment database
 !data/
 !data/journal_tracker.db
+
+# Python cache
 __pycache__/
 *.pyc
-.data/
-data/*.db
+*.pyo
+
+# Reports
 reports/daily/*.xlsx
 reports/daily/*.docx
 reports/weekly/*.xlsx

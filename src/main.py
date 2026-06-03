@@ -38,14 +38,17 @@ def run_daily(days_back: int = 7, sources: list[str] | None = None) -> None:
     from .fetch_crossref import fetch_crossref
     from .fetch_pubmed import fetch_pubmed
     from .fetch_rss import fetch_rss
+    from .fetch_publishers import fetch_publishers
 
     init_db(DB_PATH)
     sync_journals()
     topics = load_topic_keywords()
     from_date = (date.today() - timedelta(days=days_back)).isoformat()
     until_date = date.today().isoformat()
-    sources = sources or ["rss", "crossref", "pubmed"]
+    # Official publisher/homepage sources first; Crossref/PubMed remain fallback layers.
+    sources = sources or ["publisher", "rss", "crossref", "pubmed"]
     fetchers: dict[str, Fetcher] = {
+        "publisher": fetch_publishers,
         "rss": fetch_rss,
         "crossref": fetch_crossref,
         "pubmed": fetch_pubmed,
@@ -119,7 +122,7 @@ def main() -> None:
 
     daily = sub.add_parser("run-daily", help="Fetch recent articles and generate daily reports")
     daily.add_argument("--days-back", type=int, default=7, help="Publication-date lookback window for API sources")
-    daily.add_argument("--sources", nargs="+", default=["rss", "crossref", "pubmed"], choices=["rss", "crossref", "pubmed"], help="Sources to run")
+    daily.add_argument("--sources", nargs="+", default=["publisher", "rss", "crossref", "pubmed"], choices=["publisher", "rss", "crossref", "pubmed"], help="Sources to run")
     daily.add_argument("--report", action="store_true", help="Generate today's daily Word/Excel report after fetching")
 
     dr = sub.add_parser("make-daily-report", help="Generate daily report from database")
@@ -131,6 +134,8 @@ def main() -> None:
     enrich = sub.add_parser("enrich-abstracts", help="Fill missing abstracts from PubMed when PMID/DOI is available")
     enrich.add_argument("--limit", type=int, default=100, help="Maximum number of missing-abstract records to process")
     enrich.add_argument("--batch-size", type=int, default=20, help="PubMed efetch batch size")
+
+    sub.add_parser("audit-sources", help="Audit official-source coverage for the target journal list")
 
     sub.add_parser("stats", help="Show database stats")
 
@@ -160,6 +165,9 @@ def main() -> None:
         print(f"PMIDs resolved by title: {result.get('pmids_resolved_by_title', 0)}")
         print(f"PubMed records found: {result['pubmed_records_found']}")
         print(f"Abstracts filled/confirmed: {result['abstracts_filled_or_confirmed']}")
+    elif args.command == "audit-sources":
+        from .coverage_audit import print_audit
+        print_audit()
     elif args.command == "stats":
         stats()
 

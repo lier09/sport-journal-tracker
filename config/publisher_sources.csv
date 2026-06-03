@@ -1,0 +1,11 @@
+﻿journal_name,publisher,source_type,source_id,source_url,active,max_pages,verified,notes
+British Journal of Sports Medicine,BMJ,bmj_online_first,,https://bjsm.bmj.com/content/early/recent,yes,1,yes,Official BMJ Online First / Latest Articles page; BJSM also exposes RSS feeds.
+European Journal of Applied Physiology,Springer Nature,springer_journal,421,https://link.springer.com/journal/421/articles,yes,1,yes,Official Springer Articles page; solves PubMed/Crossref lag.
+Sports Medicine,Springer Nature,springer_journal,40279,https://link.springer.com/journal/40279/articles,yes,1,yes,Official Springer Articles page.
+Sports Medicine-Open,Springer Nature,springer_journal,40798,https://link.springer.com/journal/40798/articles,yes,1,yes,Official Springer Articles page.
+Journal of Orthopaedic & Sports Physical Therapy,JOSPT,generic_doi_list,,https://www.jospt.org/toc/jospt/current,no,1,pending,Candidate current issue page. Enable after local test.
+Scandinavian Journal of Medicine & Science in Sports,Wiley,generic_doi_list,,https://onlinelibrary.wiley.com/journal/16000838,no,1,pending,Candidate Wiley journal page. Need Early View URL validation.
+Journal of Sports Sciences,Taylor & Francis,generic_doi_list,,https://www.tandfonline.com/journals/rjsp20,no,1,pending,Candidate Taylor & Francis page. Need latest articles URL validation.
+American Journal of Sports Medicine,SAGE,generic_doi_list,,https://journals.sagepub.com/home/ajs,no,1,pending,Candidate SAGE page. Need latest articles URL validation.
+Medicine & Science in Sports & Exercise,Wolters Kluwer / Ovid,generic_doi_list,,https://journals.lww.com/acsm-msse/pages/currenttoc.aspx,no,1,pending,Candidate LWW current issue page. Need article-in-press URL validation.
+Journal of Strength and Conditioning Research,Wolters Kluwer / Ovid,generic_doi_list,,https://journals.lww.com/nsca-jscr/pages/currenttoc.aspx,no,1,pending,Candidate LWW current issue page. Need article-in-press URL validation.

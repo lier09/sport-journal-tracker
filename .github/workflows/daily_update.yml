@@ -40,7 +40,7 @@ jobs:
 
       - name: Run daily journal update
         # 如果 Crossref 不稳定，可改为：--sources pubmed
-        run: python -m src.main run-daily --days-back 3 --sources pubmed crossref --report
+        run: python -m src.main run-daily --days-back 7 --sources publisher rss pubmed crossref --report
 
       - name: Enrich missing abstracts from PubMed
         # Best-effort enrichment. It only fills official PubMed metadata and does not generate AI summaries.

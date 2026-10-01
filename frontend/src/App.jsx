@@ -16,6 +16,7 @@ const NAV = [
   { label: '数据源', icon: Database },
 ];
 const STATUSES = ['未读', '待读', '阅读中', '已读', '精读', '已引用', '不相关'];
+const BROWSER_READING_STATE = import.meta.env.VITE_BROWSER_READING_STATE === '1';
 
 function shortDate(value) {
   if (!value) return '日期暂缺';
@@ -139,6 +140,7 @@ function App() {
       doi: row.doi,
       title_hash: row.title_hash,
       journal_name: row.journal_name,
+      article_key: row.article_key,
       status: patch.status ?? row.status ?? '未读',
       favorite: patch.favorite ?? Boolean(row.favorite),
       user_notes: patch.user_notes ?? row.user_notes ?? '',
@@ -196,10 +198,10 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-rule" />
-        <div className="sidebar-meta"><span className="status-dot" />本机阅读模式</div>
+        <div className="sidebar-meta"><span className="status-dot" />{BROWSER_READING_STATE ? '浏览器独立阅读' : '本机阅读模式'}</div>
         <div className="sidebar-footer">
           <div className="avatar">研</div>
-          <div className="profile-copy"><strong>研究者</strong><span>私人阅读数据仅保存在本机</span></div>
+          <div className="profile-copy"><strong>研究者</strong><span>{BROWSER_READING_STATE ? '笔记仅保存在此浏览器' : '私人阅读数据仅保存在本机'}</span></div>
           <button className="icon-button quiet" aria-label="导出当前文献" title="导出当前文献" onClick={exportCsv}><FileDown size={17} /></button>
         </div>
       </aside>
@@ -209,7 +211,7 @@ function App() {
           <button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => document.body.classList.toggle('nav-open')}><Menu size={20} /></button>
           <div className="breadcrumbs"><span>文献工作台</span><ChevronRight size={14} /><strong>{title}</strong></div>
           <div className="topbar-actions">
-            <span className="local-indicator"><span className="status-dot" />本机数据</span>
+            <span className="local-indicator"><span className="status-dot" />{BROWSER_READING_STATE ? '公开文献库' : '本机数据'}</span>
             <button className="icon-button" title="导出当前结果" aria-label="导出当前结果" onClick={exportCsv}><FileDown size={18} /></button>
             <button className="icon-button" title="刷新" aria-label="刷新" onClick={() => { refreshMeta(); loadArticles(); }}><Settings2 size={18} /></button>
           </div>

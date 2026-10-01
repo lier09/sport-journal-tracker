@@ -1,0 +1,11 @@
+.git
+.github
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+*.log
+frontend/node_modules
+frontend/dist
+data/private_reading_state.sqlite3*

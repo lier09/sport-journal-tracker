@@ -26,11 +26,13 @@ The Vite development server is at `http://127.0.0.1:5173` and proxies API calls 
 
 Expansion titles are discovery sources, not a claim that every resulting record is relevant or that every publisher feed is available. Until an official publisher RSS/API endpoint is individually verified, collection uses Crossref and/or PubMed fallback searches and the source registry marks it as unverified. Broad adjacent journals use explicit sport-related keywords to reduce unrelated records. Internal priority labels (S/A/B/C) are not journal quartiles.
 
-## Data and deployment
+## Public website (Render)
 
-The public dashboard is read-only for personal reading fields. The scheduled GitHub workflow refreshes the shared article database; it must not receive a user's local reading-state database. Do not commit API keys or personal account data.
+The repository includes `render.yaml` and a multi-stage `Dockerfile` for a free Render web service. To create the public website, sign in to Render, choose **New → Blueprint**, connect `lier09/sport-journal-tracker`, and deploy the detected `sport-journal-tracker` service. Render assigns its public `onrender.com` URL after the first successful deploy. The service rebuilds when the linked `main` branch changes, including daily database updates.
 
-`app.py` retains the previous Streamlit interface for the existing Streamlit deployment. The new React interface is the default local experience; publishing it as a hosted site requires a deployment target that can run the Python API alongside the frontend. No deployment or scheduled collection is started by the local launcher.
+The free service sleeps after 15 minutes without traffic and can take about a minute to wake. Its filesystem is temporary, so personal reading states are saved in each visitor's browser storage; they do not sync between browsers or devices. The public journal/article catalog is shared and read-only. No secrets are required for this deployment.
+
+`app.py` retains the previous Streamlit interface. The local React app continues to save personal reading fields in `data/private_reading_state.sqlite3`; the public build stores them in the browser instead. Do not commit API keys or personal account data.
 
 First-seen date means the date the tracker first collected a record, not necessarily its publication date. The dashboard displays publication date separately when available.
 

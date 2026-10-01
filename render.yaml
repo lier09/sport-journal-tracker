@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: sport-journal-tracker
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: APP_PRIVATE_MODE
+        value: "0"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import html
 import mimetypes
+import os
 import re
 from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -124,6 +125,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         params = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
         try:
+            if parsed.path == "/health":
+                return self._send(200, b"ok", "text/plain; charset=utf-8")
             if parsed.path == "/api/meta":
                 journals = _catalog()
                 with connect(DB_PATH) as con:
@@ -152,6 +155,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(500, {"error": str(exc)})
 
     def do_POST(self) -> None:
+        if os.environ.get("APP_PRIVATE_MODE", "").strip() != "1":
+            return self._json(403, {"error": "公共站点只在浏览器本地保存阅读信息。"})
         if urlparse(self.path).path != "/api/article-state":
             return self._json(404, {"error": "找不到该接口。"})
         try:
@@ -195,9 +200,11 @@ def main() -> None:
     init_db(DB_PATH)
     with connect(DB_PATH) as con:
         load_journals_to_db(con, load_journals())
-    server = ThreadingHTTPServer(("127.0.0.1", 8765), Handler)
-    print("Sport Journal Tracker UI: http://127.0.0.1:8765")
-    print("Private reading state is stored only in data/private_reading_state.sqlite3")
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8765"))
+    server = ThreadingHTTPServer((host, port), Handler)
+    print(f"Sport Journal Tracker UI: http://{host}:{port}")
+    print("Private reading state is stored only in data/private_reading_state.sqlite3 when APP_PRIVATE_MODE=1")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

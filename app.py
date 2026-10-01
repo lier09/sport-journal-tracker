@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 from datetime import date, timedelta
 from pathlib import Path
@@ -10,8 +11,10 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from src.config import CONFIG_DIR, DB_PATH, ROOT
-from src.database import connect, init_db, update_article_user_fields
+from src.config import CONFIG_DIR, DB_PATH, ROOT, load_journals
+from src.coverage_audit import load_registry
+from src.database import connect, init_db, load_journals_to_db
+from src.user_state import article_key as make_article_key, load_states, save_state
 
 st.set_page_config(
     page_title="体育科学期刊更新监控看板",
@@ -19,573 +22,79 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-init_db(DB_PATH)
+@st.cache_resource
+def initialize_dashboard_database() -> None:
+    init_db(DB_PATH)
+    with connect(DB_PATH) as con:
+        load_journals_to_db(con, load_journals())
+
+
+initialize_dashboard_database()
 
 READING_STATUS = ["未读", "待读", "阅读中", "已读", "精读", "已引用", "不相关"]
+PRIVATE_READING_MODE = os.environ.get("APP_PRIVATE_MODE", "").strip() == "1"
 
 st.markdown(
     """
 <style>
 :root {
-  --jt-bg: #F6F8FC;
-  --jt-panel: #FFFFFF;
-  --jt-panel-2: #F8FAFC;
-  --jt-line: rgba(15, 23, 42, 0.10);
-  --jt-muted: #64748B;
-  --jt-text: #0F172A;
-  --jt-blue: #2563EB;
-  --jt-cyan: #0891B2;
-  --jt-green: #16A34A;
-  --jt-orange: #EA580C;
-  --jt-purple: #7C3AED;
-  --jt-red: #DC2626;
+  --ink:#182b3b; --muted:#526270; --line:#d9e1e7; --paper:#ffffff;
+  --canvas:#f3f6f8; --navy:#21445d; --blue:#2b6f91; --soft:#eaf1f5;
+  --green:#176b52; --amber:#815a13; --purple:#63547a;
+}
+html, body, [class*="css"] { font-family:"Segoe UI","Microsoft YaHei",Arial,sans-serif; }
+.stApp { background:var(--canvas); color:var(--ink); }
+.block-container { max-width:1320px; padding-top:1.35rem; padding-bottom:3rem; }
+[data-testid="stSidebar"] { background:#edf2f5; border-right:1px solid var(--line); }
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color:var(--muted); }
+[data-testid="stHeader"] { background:rgba(243,246,248,.94); }
+.hero { background:var(--paper); border:1px solid var(--line); border-left:5px solid var(--navy); border-radius:12px; padding:22px 26px; margin:0 0 18px; box-shadow:0 2px 10px rgba(24,43,59,.035); }
+.hero-title { font-size:1.8rem; line-height:1.25; font-weight:750; letter-spacing:-.02em; color:var(--ink); margin:0 0 7px; }
+.hero-subtitle { font-size:.96rem; color:var(--muted); line-height:1.65; max-width:880px; }
+.hero-chip { display:none; }
+.kpi-card { height:100%; min-height:100px; background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:15px 17px; box-shadow:none; }
+.kpi-icon { display:none; }
+.kpi-value { font-size:1.75rem; font-weight:760; letter-spacing:-.03em; color:var(--navy); line-height:1.1; }
+.kpi-label { font-size:.9rem; color:var(--ink); margin-top:8px; font-weight:650; }
+.kpi-note,.small-muted { font-size:.78rem; color:var(--muted); line-height:1.5; }
+.section-title { font-size:1.12rem; font-weight:720; margin:1.25rem 0 .45rem; color:var(--ink); }
+.section-subtitle { font-size:.88rem; color:var(--muted); margin:0 0 .75rem; line-height:1.55; }
+.paper-card { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:16px 19px; margin:12px 0; box-shadow:0 2px 8px rgba(24,43,59,.035); }
+.paper-card:hover { border-color:#9bb1bf; box-shadow:0 4px 14px rgba(24,43,59,.07); }
+.paper-topline { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-bottom:6px; }
+.badge { display:inline-flex; align-items:center; border-radius:5px; padding:4px 8px; font-size:.75rem; font-weight:600; border:1px solid var(--line); background:#f5f8fa; color:#405767; }
+.badge-blue { background:#edf4f8; color:#244e67; border-color:#d0e0e8; }
+.badge-green { background:#edf6f2; color:var(--green); border-color:#d2e9df; }
+.badge-orange { background:#faf4e8; color:var(--amber); border-color:#eee0bd; }
+.badge-purple { background:#f4f1f7; color:var(--purple); border-color:#e2dbea; }
+.badge-pending { background:#f5f6f7; color:var(--muted); }
+.card-title { font-size:1.03rem; font-weight:700; line-height:1.5; color:var(--ink); margin:8px 0 5px; }
+.card-meta { font-size:.83rem; color:var(--muted); line-height:1.55; }
+.card-preview { font-size:.91rem; color:#2d3e4b; line-height:1.62; margin-top:8px; }
+.card-abstract { border-left:3px solid #8ca9ba; background:#f5f8fa; border-radius:0 8px 8px 0; padding:12px 15px; line-height:1.7; color:#243845; }
+.detail-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:8px 0; }
+.detail-cell { background:#f5f8fa; border:1px solid var(--line); border-radius:8px; padding:9px 11px; }
+.detail-label { color:var(--muted); font-size:.76rem; margin-bottom:3px; }
+.detail-value { color:var(--ink); font-size:.86rem; overflow-wrap:anywhere; }
+.sidebar-title { font-size:1rem; font-weight:720; color:var(--ink); margin:.35rem 0; }
+.sidebar-help { font-size:.82rem; color:var(--muted); line-height:1.5; }
+.soft-divider { height:1px; background:var(--line); margin:14px 0; }
+.empty-state { background:var(--paper); border:1px dashed #bbc9d2; border-radius:10px; padding:20px; color:var(--muted); }
+.journal-section { border-bottom:1px solid var(--line); padding:10px 0 6px; margin-top:8px; color:var(--navy); font-weight:700; }
+.journal-card-fixed,.topic-card-fixed,.dashboard-card { background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:13px 15px; margin:7px 0; }
+.journal-card-fixed-title,.topic-card-fixed-title { color:var(--ink); font-weight:680; line-height:1.45; }
+.metric-row-fixed { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.metric-pill-fixed,.focus-pill-fixed { display:inline-flex; align-items:center; padding:4px 8px; border:1px solid var(--line); border-radius:5px; background:#f5f8fa; color:#405767; font-size:.76rem; font-weight:600; }
+.focus-pill-fixed { background:#fbf5e9; color:var(--amber); border-color:#eee0bd; }
+.topic-card-fixed-number { font-size:1.7rem; font-weight:750; color:var(--navy); }
+button, [role="button"], input, textarea { border-radius:7px !important; }
+:focus-visible { outline:3px solid #2b6f91 !important; outline-offset:2px !important; }
+@media (max-width:768px) {
+  .block-container { padding:1rem .8rem 2rem; }
+  .hero { padding:17px 18px; }
+  .hero-title { font-size:1.45rem; }
+  .paper-card { padding:14px; }
 }
-
-html, body, [class*="css"] {
-  font-family: "Inter", "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
-}
-
-.stApp {
-  background:
-    radial-gradient(circle at 8% 0%, rgba(37,99,235,.075), transparent 26%),
-    radial-gradient(circle at 90% 4%, rgba(14,165,233,.08), transparent 28%),
-    linear-gradient(180deg, #F8FAFC 0%, #EEF2F7 100%);
-  color: var(--jt-text);
-}
-
-.block-container {
-  padding-top: 1.35rem;
-  padding-bottom: 3rem;
-  max-width: 1480px;
-}
-
-[data-testid="stSidebar"] {
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.96));
-  border-right: 1px solid rgba(15,23,42,.08);
-  box-shadow: 8px 0 30px rgba(15,23,42,.035);
-}
-
-[data-testid="stSidebar"] * {
-  font-size: .93rem;
-}
-
-
-/* Streamlit sidebar: force readable light theme colors */
-[data-testid="stSidebar"],
-[data-testid="stSidebarContent"] {
-  background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%) !important;
-  color: #0F172A !important;
-}
-
-[data-testid="stSidebar"] *,
-[data-testid="stSidebarContent"] *,
-[data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span,
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] div,
-[data-testid="stSidebar"] li,
-[data-testid="stSidebar"] h1,
-[data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3,
-[data-testid="stSidebar"] h4 {
-  color: #0F172A !important;
-  opacity: 1 !important;
-}
-
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] span {
-  color: #334155 !important;
-}
-
-[data-testid="stSidebar"] .sidebar-title {
-  color: #0F172A !important;
-}
-
-[data-testid="stSidebar"] .sidebar-help {
-  color: #64748B !important;
-}
-
-[data-testid="stSidebar"] div[role="radiogroup"] label,
-[data-testid="stSidebar"] div[role="radiogroup"] label span,
-[data-testid="stSidebar"] [data-testid="stRadio"] label,
-[data-testid="stSidebar"] [data-testid="stCheckbox"] label,
-[data-testid="stSidebar"] [data-testid="stMultiSelect"] label,
-[data-testid="stSidebar"] [data-testid="stSelectbox"] label,
-[data-testid="stSidebar"] [data-testid="stDateInput"] label,
-[data-testid="stSidebar"] [data-testid="stTextInput"] label {
-  color: #0F172A !important;
-}
-
-[data-testid="stSidebar"] input,
-[data-testid="stSidebar"] textarea,
-[data-testid="stSidebar"] [data-baseweb="select"] > div,
-[data-testid="stSidebar"] [data-baseweb="input"] > div {
-  background: #FFFFFF !important;
-  color: #0F172A !important;
-  border-color: rgba(15,23,42,.14) !important;
-}
-
-[data-testid="stSidebar"] svg,
-[data-testid="stSidebar"] path,
-[data-testid="stSidebar"] circle {
-  color: #334155 !important;
-}
-
-[data-testid="stHeader"] {
-  background: rgba(248,250,252,.88) !important;
-  backdrop-filter: blur(12px);
-}
-
-[data-testid="stToolbar"],
-[data-testid="stDecoration"],
-[data-testid="stStatusWidget"] {
-  color: #0F172A !important;
-}
-
-.hero {
-  position: relative;
-  border: 1px solid rgba(37,99,235,.14);
-  border-radius: 28px;
-  padding: 28px 32px;
-  margin-bottom: 18px;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 12% 18%, rgba(37,99,235,.14), transparent 34%),
-    radial-gradient(circle at 86% 12%, rgba(14,165,233,.13), transparent 34%),
-    linear-gradient(135deg, rgba(255,255,255,.98), rgba(241,245,249,.92));
-  box-shadow: 0 22px 58px rgba(15,23,42,.075);
-}
-
-.hero:before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(110deg, transparent 0%, rgba(255,255,255,.75) 44%, transparent 70%);
-  transform: translateX(-30%);
-  pointer-events: none;
-}
-
-.hero-title {
-  position: relative;
-  font-size: 2.08rem;
-  line-height: 1.18;
-  font-weight: 880;
-  letter-spacing: -.035em;
-  color: #0F172A;
-  margin-bottom: 9px;
-}
-
-.hero-subtitle {
-  position: relative;
-  font-size: .99rem;
-  color: #475569;
-  max-width: 1080px;
-  line-height: 1.74;
-}
-
-.hero-chip {
-  position: relative;
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  padding:7px 12px;
-  border-radius:999px;
-  background:rgba(37,99,235,.075);
-  border:1px solid rgba(37,99,235,.14);
-  color:#1D4ED8;
-  font-size:.8rem;
-  font-weight: 650;
-  margin-right:8px;
-  margin-top:13px;
-}
-
-.kpi-card {
-  border: 1px solid rgba(15,23,42,.08);
-  border-radius: 22px;
-  padding: 18px 18px;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,1), rgba(248,250,252,.96));
-  box-shadow: 0 14px 34px rgba(15,23,42,.065);
-  min-height: 118px;
-}
-
-.kpi-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 15px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-size: 1.2rem;
-  background: linear-gradient(135deg, rgba(37,99,235,.10), rgba(14,165,233,.08));
-  border: 1px solid rgba(37,99,235,.13);
-  margin-bottom: 10px;
-}
-
-.kpi-value {
-  font-size: 2.06rem;
-  font-weight: 880;
-  color: #0F172A;
-  letter-spacing: -.045em;
-  line-height: 1;
-}
-
-.kpi-label {
-  font-size: .88rem;
-  color: #334155;
-  margin-top: 8px;
-  font-weight: 700;
-}
-
-.kpi-note {
-  font-size: .74rem;
-  color: #64748B;
-  margin-top: 3px;
-  line-height: 1.35;
-}
-
-.section-title {
-  font-size: 1.16rem;
-  font-weight: 850;
-  margin: 1.18rem 0 .65rem;
-  color: #0F172A;
-  letter-spacing: -.015em;
-}
-
-.section-subtitle {
-  font-size: .86rem;
-  color: #64748B;
-  margin-top: -.25rem;
-  margin-bottom: .8rem;
-}
-
-.paper-card {
-  border: 1px solid rgba(15,23,42,.08);
-  border-radius: 23px;
-  padding: 16px 18px;
-  margin: 12px 0;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.99), rgba(248,250,252,.96));
-  box-shadow: 0 16px 38px rgba(15,23,42,.065);
-}
-
-.paper-card:hover {
-  border-color: rgba(37,99,235,.22);
-  box-shadow: 0 20px 48px rgba(37,99,235,.10);
-}
-
-.card-title {
-  font-weight: 850;
-  font-size: 1.04rem;
-  line-height: 1.5;
-  color: #0F172A;
-  margin: 7px 0 8px;
-}
-
-.card-meta {
-  color:#475569;
-  font-size:.84rem;
-  line-height: 1.6;
-}
-
-.card-abstract {
-  line-height: 1.72;
-  color:#1E293B;
-  padding: 13px 15px;
-  border-left: 3px solid rgba(37,99,235,.50);
-  background: rgba(239,246,255,.68);
-  border-radius: 14px;
-  margin: 8px 0 12px;
-}
-
-.badge {
-  display: inline-flex;
-  align-items:center;
-  gap: 4px;
-  border-radius: 999px;
-  padding: 4px 10px;
-  margin: 3px 5px 3px 0;
-  font-size: 0.76rem;
-  font-weight: 650;
-  border: 1px solid rgba(15,23,42,.10);
-  background: rgba(248,250,252,.88);
-  color:#334155;
-}
-
-.badge-blue {
-  background: rgba(37,99,235,.085);
-  border-color: rgba(37,99,235,.16);
-  color:#1D4ED8;
-}
-
-.badge-green {
-  background: rgba(22,163,74,.085);
-  border-color: rgba(22,163,74,.16);
-  color:#15803D;
-}
-
-.badge-orange {
-  background: rgba(234,88,12,.085);
-  border-color: rgba(234,88,12,.16);
-  color:#C2410C;
-}
-
-.badge-purple {
-  background: rgba(124,58,237,.085);
-  border-color: rgba(124,58,237,.16);
-  color:#6D28D9;
-}
-
-.badge-red {
-  background: rgba(220,38,38,.075);
-  border-color: rgba(220,38,38,.15);
-  color:#B91C1C;
-}
-
-.badge-muted {
-  background: rgba(100,116,139,.08);
-  color:#475569;
-}
-.badge-pending {
-  background: rgba(234,179,8,.12);
-  border-color: rgba(234,179,8,.22);
-  color:#A16207;
-}
-
-.journal-section {
-  font-size: 1.22rem;
-  font-weight: 860;
-  margin-top: 1.35rem;
-  padding: .95rem 1rem;
-  border: 1px solid rgba(15,23,42,.08);
-  border-radius: 19px;
-  background: linear-gradient(90deg, rgba(255,255,255,.98), rgba(239,246,255,.78));
-  color: #0F172A;
-  box-shadow: 0 10px 26px rgba(15,23,42,.045);
-}
-
-.small-muted {
-  font-size: .82rem;
-  color: #64748B;
-  font-weight: 550;
-}
-
-.sidebar-title {
-  font-weight: 880;
-  color:#0F172A;
-  font-size: 1.03rem;
-  margin: .45rem 0 .35rem;
-}
-
-.sidebar-help {
-  font-size:.78rem;
-  color:#64748B;
-  line-height:1.48;
-  margin-bottom:.6rem;
-}
-
-.soft-divider {
-  height:1px;
-  background:rgba(15,23,42,.08);
-  margin: .9rem 0;
-}
-
-.stDownloadButton > button, .stButton > button, .stLinkButton > a {
-  border-radius: 13px !important;
-  border-color: rgba(15,23,42,.12) !important;
-  background: #FFFFFF !important;
-  color: #0F172A !important;
-  box-shadow: 0 6px 16px rgba(15,23,42,.045) !important;
-  transition: all .18s ease !important;
-}
-
-.stDownloadButton > button:hover, .stButton > button:hover, .stLinkButton > a:hover {
-  transform: translateY(-1px);
-  border-color: rgba(37,99,235,.28) !important;
-  box-shadow: 0 10px 22px rgba(37,99,235,.10) !important;
-}
-
-div[data-testid="stExpander"] {
-  border: 1px solid rgba(15,23,42,.08);
-  border-radius: 16px;
-  background: rgba(255,255,255,.86);
-}
-
-div[data-testid="stAlert"] {
-  border-radius: 16px;
-}
-
-hr {
-  border-color: rgba(15,23,42,.08);
-}
-
-[data-testid="stMetric"] {
-  background: #FFFFFF;
-  border: 1px solid rgba(15,23,42,.08);
-  border-radius: 18px;
-  padding: 14px 16px;
-}
-
-/* v4.5 Product UI Edition */
-.product-strip {
-  display:grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-  margin: 14px 0 20px;
-}
-.product-tile {
-  border: 1px solid rgba(37,99,235,.12);
-  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.92));
-  border-radius: 22px;
-  padding: 17px 18px;
-  box-shadow: 0 16px 36px rgba(15,23,42,.055);
-}
-.product-tile-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 16px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  margin-bottom: 10px;
-  font-size: 1.18rem;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 10px 22px rgba(37,99,235,.10);
-}
-.icon-blue { background: linear-gradient(135deg, rgba(37,99,235,.14), rgba(14,165,233,.10)); border: 1px solid rgba(37,99,235,.18); color:#1D4ED8; }
-.icon-green { background: linear-gradient(135deg, rgba(22,163,74,.14), rgba(34,197,94,.08)); border: 1px solid rgba(22,163,74,.18); color:#15803D; }
-.icon-purple { background: linear-gradient(135deg, rgba(124,58,237,.14), rgba(168,85,247,.08)); border: 1px solid rgba(124,58,237,.18); color:#6D28D9; }
-.icon-orange { background: linear-gradient(135deg, rgba(234,88,12,.14), rgba(251,146,60,.08)); border: 1px solid rgba(234,88,12,.18); color:#C2410C; }
-.product-tile-title { font-weight: 840; color: #0F172A; margin-bottom: 4px; }
-.product-tile-desc { color: #64748B; font-size: .80rem; line-height: 1.48; }
-.dashboard-card {
-  border: 1px solid rgba(15,23,42,.08);
-  border-radius: 24px;
-  padding: 18px 20px;
-  background: rgba(255,255,255,.93);
-  box-shadow: 0 18px 42px rgba(15,23,42,.06);
-  margin: 12px 0;
-}
-.paper-topline { display:flex; flex-wrap:wrap; gap: 6px; margin-bottom: 8px; }
-.card-preview {
-  color:#64748B; font-size:.88rem; line-height:1.65; margin-top: 8px; padding: 10px 12px;
-  border-radius: 14px; background: rgba(248,250,252,.88); border: 1px solid rgba(15,23,42,.06);
-}
-.detail-grid {
-  display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 4px 0 12px;
-}
-.detail-cell {
-  padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(15,23,42,.08); background: rgba(248,250,252,.9);
-}
-.detail-label { color:#64748B; font-size:.72rem; font-weight:700; margin-bottom:3px; }
-.detail-value { color:#0F172A; font-size:.86rem; font-weight:700; word-break:break-word; }
-.journal-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 10px; }
-.journal-card {
-  border: 1px solid rgba(15,23,42,.08); border-radius: 22px; padding: 16px 18px;
-  background: linear-gradient(180deg, #FFFFFF, #F8FAFC); box-shadow: 0 14px 32px rgba(15,23,42,.055);
-}
-.journal-card-title { font-weight: 840; color:#0F172A; line-height:1.42; margin-bottom: 10px; }
-.journal-card-stats { display:flex; gap:8px; flex-wrap:wrap; }
-.stat-pill {
-  border-radius:999px; padding:4px 9px; font-size:.75rem; font-weight:680;
-  border:1px solid rgba(37,99,235,.14); background:rgba(37,99,235,.07); color:#1D4ED8;
-}
-.topic-grid { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 10px; }
-.topic-card {
-  border: 1px solid rgba(124,58,237,.12); border-radius: 22px; padding: 16px 18px;
-  background: linear-gradient(180deg, #FFFFFF, #F8FAFC); box-shadow: 0 14px 32px rgba(15,23,42,.055);
-}
-.topic-title { font-weight: 850; color:#4C1D95; margin-bottom: 8px; }
-.topic-number { font-size: 1.86rem; font-weight: 880; color:#0F172A; letter-spacing:-.04em; }
-.empty-state {
-  border: 1px dashed rgba(37,99,235,.22); border-radius: 22px; padding: 22px 24px;
-  background: rgba(239,246,255,.55); color: #334155; line-height: 1.7;
-}
-@media (max-width: 1100px) {
-  .product-strip, .journal-grid, .topic-grid { grid-template-columns: 1fr; }
-  .detail-grid { grid-template-columns: 1fr 1fr; }
-}
-
-
-.focus-note {
-  border: 1px solid rgba(245,158,11,.18);
-  background: linear-gradient(180deg, rgba(255,251,235,.9), rgba(255,255,255,.92));
-  border-radius: 18px;
-  padding: 12px 14px;
-  color: #92400E;
-  font-size: .82rem;
-  line-height: 1.55;
-  margin: 8px 0 12px;
-}
-.focus-pill {
-  border-radius:999px;
-  padding:4px 9px;
-  font-size:.75rem;
-  font-weight:760;
-  border:1px solid rgba(245,158,11,.22);
-  background:rgba(245,158,11,.10);
-  color:#B45309;
-}
-
-
-/* v4.9 restore original visual style + stable card rendering */
-.stApp {
-  background: linear-gradient(180deg, #F8FAFC 0%, #EEF4FB 100%);
-}
-.journal-card-fixed, .topic-card-fixed {
-  border: 1px solid rgba(15,23,42,.08);
-  border-radius: 22px;
-  padding: 18px 20px;
-  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.92));
-  box-shadow: 0 14px 32px rgba(15,23,42,.055);
-  min-height: 168px;
-  margin-bottom: 14px;
-}
-.journal-card-fixed-title {
-  font-weight: 850;
-  color: #0F172A;
-  line-height: 1.38;
-  font-size: 1.04rem;
-  margin-bottom: 12px;
-}
-.journal-card-fixed-domain {
-  color:#64748B;
-  font-size:.84rem;
-  line-height:1.55;
-  margin-top: 12px;
-  word-break: break-word;
-}
-.metric-row-fixed {
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-  margin-top: 8px;
-}
-.metric-pill-fixed {
-  display:inline-flex;
-  align-items:center;
-  border-radius:999px;
-  padding:5px 10px;
-  font-size:.78rem;
-  font-weight:720;
-  border:1px solid rgba(37,99,235,.14);
-  background:rgba(37,99,235,.07);
-  color:#1D4ED8;
-}
-.focus-pill-fixed {
-  display:inline-flex;
-  align-items:center;
-  border-radius:999px;
-  padding:5px 10px;
-  font-size:.78rem;
-  font-weight:720;
-  border:1px solid rgba(234,179,8,.24);
-  background:rgba(254,249,195,.74);
-  color:#A16207;
-}
-.topic-card-fixed-title { font-weight:850; color:#4C1D95; margin-bottom:8px; }
-.topic-card-fixed-number { font-size:2rem; font-weight:900; color:#0F172A; letter-spacing:-.04em; }
-
 </style>
 """,
     unsafe_allow_html=True,
@@ -681,7 +190,8 @@ def load_journals() -> pd.DataFrame:
     with connect(DB_PATH) as con:
         return pd.read_sql_query(
             """
-            SELECT journal_name, priority, domain, frequency, issn, eissn, rss_url, active
+            SELECT journal_name, priority, domain, frequency, issn, eissn, rss_url, active,
+                   collection_group, collection_mode, scope_keywords
             FROM journals
             WHERE active=1
             ORDER BY
@@ -697,7 +207,7 @@ def load_articles(start: str, end: str) -> pd.DataFrame:
     with connect(DB_PATH) as con:
         df = pd.read_sql_query(
             """
-            SELECT a.article_id, a.first_seen_date, a.publication_date, a.journal_name, j.priority,
+            SELECT a.article_id, a.title_hash, a.first_seen_date, a.publication_date, a.journal_name, j.priority,
                    j.domain, a.title, a.authors, a.doi, a.url, a.fulltext_url, a.source, a.pmid,
                    a.abstract, a.topics, a.matched_keywords, a.study_type, a.status,
                    a.favorite, a.user_notes, a.personal_tags, a.created_at, a.updated_at
@@ -709,6 +219,36 @@ def load_articles(start: str, end: str) -> pd.DataFrame:
             con,
             params=(start, end),
         )
+        journal_catalog = pd.read_sql_query("SELECT journal_name FROM journals", con)
+    if df.empty:
+        return normalize_article_df(df)
+    df = df.copy()
+    canonical_journals = {
+        re.sub(r"[^a-z0-9]+", "", str(name).casefold()): str(name)
+        for name in journal_catalog["journal_name"].dropna().tolist()
+    }
+    df["journal_name"] = df["journal_name"].map(
+        lambda name: canonical_journals.get(
+            re.sub(r"[^a-z0-9]+", "", str(name).casefold()), name
+        )
+    )
+    if PRIVATE_READING_MODE:
+        keys = [
+            make_article_key(doi=r.doi, title_hash=r.title_hash, journal_name=r.journal_name)
+            for r in df.itertuples(index=False)
+        ]
+        state_by_key = load_states(keys)
+        states = [state_by_key.get(key, {}) for key in keys]
+        df["status"] = [s.get("status", "未读") for s in states]
+        df["favorite"] = [s.get("favorite", 0) for s in states]
+        df["user_notes"] = [s.get("user_notes", "") for s in states]
+        df["personal_tags"] = [s.get("personal_tags", "") for s in states]
+    else:
+        # Public deployments never read or write personal fields in the shared database.
+        df["status"] = "未读"
+        df["favorite"] = 0
+        df["user_notes"] = ""
+        df["personal_tags"] = ""
     return normalize_article_df(df)
 
 
@@ -843,7 +383,6 @@ def kpi(icon: str, value, label: str, note: str = "") -> None:
     st.markdown(
         f"""
         <div class="kpi-card">
-          <div class="kpi-icon">{esc(icon)}</div>
           <div class="kpi-value">{esc(value)}</div>
           <div class="kpi-label">{esc(label)}</div>
           <div class="kpi-note">{esc(note)}</div>
@@ -935,19 +474,29 @@ def render_article_card(row, *, key_prefix: str = "card") -> None:
         with tab_link:
             render_links(row)
         with tab_note:
-            st.caption("公开部署版中，阅读状态/备注属于公共数据库字段；如果多人共同使用，建议主要用于管理员维护。")
-            s_col, f_col = st.columns([2, 1])
-            current_status = row.get("status", "未读") if row.get("status", "未读") in READING_STATUS else "未读"
-            new_status = s_col.selectbox("阅读状态", READING_STATUS, index=READING_STATUS.index(current_status), key=f"{key_prefix}_status_{article_id}")
-            new_fav = f_col.checkbox("收藏", value=bool(row.get("favorite", 0)), key=f"{key_prefix}_fav_{article_id}")
-            new_tags = st.text_input("个人标签", value=str(row.get("personal_tags", "") or ""), key=f"{key_prefix}_tags_{article_id}", placeholder="如：低氧训练；可用于讨论；精读")
-            new_notes = st.text_area("个人备注", value=str(row.get("user_notes", "") or ""), key=f"{key_prefix}_notes_{article_id}", height=80)
-            if st.button("保存阅读信息", key=f"{key_prefix}_save_{article_id}"):
-                with connect(DB_PATH) as con:
-                    update_article_user_fields(con, article_id, status=new_status, favorite=1 if new_fav else 0, user_notes=new_notes, personal_tags=new_tags)
-                st.success("已保存。")
-                st.cache_data.clear()
-                st.rerun()
+            if not PRIVATE_READING_MODE:
+                st.info("公开看板为只读模式。阅读状态、收藏和备注仅在本机版保存，避免进入共享数据库。")
+            else:
+                st.caption("阅读信息仅保存到本机 private_reading_state.sqlite3，不会随公开数据库同步。")
+                current_status = row.get("status", "未读") if row.get("status", "未读") in READING_STATUS else "未读"
+                with st.form(f"{key_prefix}_reading_form_{article_id}"):
+                    s_col, f_col = st.columns([2, 1])
+                    new_status = s_col.selectbox("阅读状态", READING_STATUS, index=READING_STATUS.index(current_status), key=f"{key_prefix}_status_{article_id}")
+                    new_fav = f_col.checkbox("收藏", value=bool(row.get("favorite", 0)), key=f"{key_prefix}_fav_{article_id}")
+                    new_tags = st.text_input("个人标签", value=str(row.get("personal_tags", "") or ""), key=f"{key_prefix}_tags_{article_id}", placeholder="如：低氧训练；可用于讨论；精读")
+                    new_notes = st.text_area("个人备注", value=str(row.get("user_notes", "") or ""), key=f"{key_prefix}_notes_{article_id}", height=80)
+                    save_reading = st.form_submit_button("保存到本机", type="primary")
+                if save_reading:
+                    save_state(
+                        article_key_value=make_article_key(doi=row.get("doi", ""), title_hash=row.get("title_hash", ""), journal_name=journal),
+                        status=new_status,
+                        favorite=new_fav,
+                        user_notes=new_notes,
+                        personal_tags=new_tags,
+                    )
+                    st.success("已保存到本机。")
+                    st.cache_data.clear()
+                    st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -1068,9 +617,10 @@ def render_export_center(df: pd.DataFrame, selected_date: date) -> None:
     st.markdown('<div class="section-subtitle">导出当前筛选结果，适合导入 Zotero、EndNote、NoteExpress 或进一步整理。</div>', unsafe_allow_html=True)
     export_cols = [
         "first_seen_date", "publication_date", "journal_name", "priority", "title", "authors", "doi", "url",
-        "fulltext_url", "source", "pmid", "topics", "matched_keywords", "study_type", "status",
-        "favorite", "personal_tags", "user_notes", "abstract",
+        "fulltext_url", "source", "pmid", "topics", "matched_keywords", "study_type", "abstract",
     ]
+    if PRIVATE_READING_MODE:
+        export_cols += ["status", "favorite", "personal_tags", "user_notes"]
     export_df = df[[c for c in export_cols if c in df.columns]].copy() if not df.empty else pd.DataFrame(columns=export_cols)
     e1, e2, e3 = st.columns(3)
     e1.download_button("⬇️ 当前筛选 CSV", export_df.to_csv(index=False).encode("utf-8-sig"), file_name=f"journal_updates_{selected_date.isoformat()}.csv", mime="text/csv", use_container_width=True)
@@ -1088,8 +638,69 @@ def render_article_cards(df: pd.DataFrame, *, key_prefix: str) -> None:
     if df.empty:
         st.info("当前条件下暂无更新论文。")
         return
-    for _, row in df.iterrows():
+    page_size = 12
+    page_key = f"article_page_{key_prefix}"
+    page_count = max(1, (len(df) + page_size - 1) // page_size)
+    page = min(max(int(st.session_state.get(page_key, 0)), 0), page_count - 1)
+    st.session_state[page_key] = page
+    st.caption(f"共 {len(df)} 篇 · 第 {page + 1}/{page_count} 页 · 每页 {page_size} 篇")
+    if page_count > 1:
+        prev_col, page_col, next_col = st.columns([1, 2, 1])
+        if prev_col.button("上一页", key=f"{page_key}_prev", disabled=page == 0, use_container_width=True):
+            st.session_state[page_key] = page - 1
+            st.rerun()
+        page_col.markdown(f"<div style='text-align:center;padding:.45rem'>第 {page + 1} 页 / 共 {page_count} 页</div>", unsafe_allow_html=True)
+        if next_col.button("下一页", key=f"{page_key}_next", disabled=page >= page_count - 1, use_container_width=True):
+            st.session_state[page_key] = page + 1
+            st.rerun()
+    start = page * page_size
+    for _, row in df.iloc[start:start + page_size].iterrows():
         render_article_card(row, key_prefix=key_prefix)
+
+
+def render_journal_library(journals_df: pd.DataFrame) -> None:
+    st.markdown('<div class="section-title">期刊库</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-subtitle">按研究方向浏览追踪目录。专门运动期刊按刊检索；跨学科期刊用题名/摘要关键词限制范围。S/A/B/C 是项目内关注级别，不代表 JCR 分区。</div>',
+        unsafe_allow_html=True,
+    )
+    if journals_df.empty:
+        render_empty("期刊目录为空。")
+        return
+    groups = sorted(x for x in journals_df.get("collection_group", pd.Series(dtype=str)).fillna("").unique() if x)
+    f1, f2 = st.columns([1, 2])
+    selected_group = f1.selectbox("研究方向", ["全部方向"] + groups)
+    search = f2.text_input("搜索期刊", placeholder="输入期刊名或研究领域")
+    view = journals_df.copy()
+    if selected_group != "全部方向":
+        view = view[view["collection_group"] == selected_group]
+    if search.strip():
+        needle = re.escape(search.strip().casefold())
+        mask = (
+            view["journal_name"].fillna("").str.casefold().str.contains(needle, na=False)
+            | view["domain"].fillna("").str.casefold().str.contains(needle, na=False)
+            | view.get("collection_group", pd.Series("", index=view.index)).fillna("").str.casefold().str.contains(needle, na=False)
+        )
+        view = view[mask]
+    registry = load_registry()
+    if not registry.empty and "journal_name" in registry:
+        coverage = registry.set_index("journal_name").to_dict("index")
+    else:
+        coverage = {}
+    out = view.copy()
+    out["来源状态"] = out["journal_name"].map(
+        lambda name: "已核验出版社源" if str(coverage.get(name, {}).get("official_source_verified", "")).casefold() in {"yes", "true", "1"}
+        else "待核验；Crossref/PubMed 兜底"
+    )
+    out["抓取策略"] = out.get("collection_mode", pd.Series("journal_all", index=out.index)).map(
+        lambda value: "运动相关条目筛选" if value == "keyword_filter" else "按刊检索"
+    )
+    show_cols = ["journal_name", "collection_group", "domain", "priority", "issn", "eissn", "抓取策略", "来源状态"]
+    labels = {"journal_name": "期刊", "collection_group": "研究方向", "domain": "细分主题", "priority": "关注级别", "issn": "ISSN", "eissn": "eISSN"}
+    st.caption(f"显示 {len(out)} / {len(journals_df)} 本期刊")
+    st.dataframe(out[[c for c in show_cols if c in out.columns]].rename(columns=labels), use_container_width=True, hide_index=True)
+    verified = int(out["来源状态"].eq("已核验出版社源").sum())
+    st.caption(f"当前筛选范围：{verified} 本已有核验出版社源，其余暂用 Crossref / PubMed，并标记为待核验。")
 
 
 def render_by_journal(df: pd.DataFrame, *, key_prefix: str) -> None:
@@ -1097,9 +708,10 @@ def render_by_journal(df: pd.DataFrame, *, key_prefix: str) -> None:
         st.info("当前条件下暂无更新论文。")
         return
     counts = df.groupby("journal_name").size().sort_values(ascending=False)
-    for journal, count in counts.items():
-        st.markdown(f'<div class="journal-section">📚 {esc(journal)} <span class="small-muted">{count} 篇</span></div>', unsafe_allow_html=True)
-        render_article_cards(df[df["journal_name"] == journal], key_prefix=f"{key_prefix}_{re.sub(r'[^A-Za-z0-9]+','_',str(journal))}")
+    labels = {f"{name} · {int(count)} 篇": name for name, count in counts.items()}
+    selected = st.selectbox("选择期刊", list(labels), key=f"{key_prefix}_journal_choice", label_visibility="collapsed")
+    journal = labels[selected]
+    render_article_cards(df[df["journal_name"] == journal], key_prefix=f"{key_prefix}_{re.sub(r'[^A-Za-z0-9]+','_',str(journal))}")
 
 
 def render_by_topic(df: pd.DataFrame, *, key_prefix: str) -> None:
@@ -1107,83 +719,81 @@ def render_by_topic(df: pd.DataFrame, *, key_prefix: str) -> None:
         st.info("当前条件下暂无更新论文。")
         return
     counts = topic_counts(df)
-    for topic, count in counts.items():
-        st.markdown(f'<div class="journal-section">🏷 {esc(topic)} <span class="small-muted">{int(count)} 篇</span></div>', unsafe_allow_html=True)
-        if topic == "未命中专题":
-            sub = df[df["topics"].fillna("").astype(str).str.strip() == ""]
-        else:
-            sub = df[df["topics"].fillna("").apply(lambda x: topic in _split_items(x))]
-        render_article_cards(sub, key_prefix=f"{key_prefix}_{re.sub(r'[^A-Za-z0-9]+','_',str(topic))}")
+    labels = {f"{topic} · {int(count)} 篇": topic for topic, count in counts.items()}
+    selected = st.selectbox("选择专题", list(labels), key=f"{key_prefix}_topic_choice", label_visibility="collapsed")
+    topic = labels[selected]
+    if topic == "未命中专题":
+        sub = df[df["topics"].fillna("").astype(str).str.strip() == ""]
+    else:
+        sub = df[df["topics"].fillna("").apply(lambda x: topic in _split_items(x))]
+    render_article_cards(sub, key_prefix=f"{key_prefix}_{re.sub(r'[^A-Za-z0-9]+','_',str(topic))}")
 
 
 journals_df = load_journals()
 journal_names = journals_df["journal_name"].tolist() if not journals_df.empty else []
 
 with st.sidebar:
-    st.markdown('<div class="sidebar-title">📡 期刊监控</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sidebar-help">按日期、期刊与专题查看每日新增。统计口径为 first_seen_date，即系统首次发现日期。</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-title">体育科学文献台</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-help">按首次收录日期浏览文献。首次收录日期不同于期刊正式发表日期。</div>', unsafe_allow_html=True)
 
     page = st.radio(
         "导航",
-        ["🏠 首页总览", "📰 今日更新", "🗓 日期检索", "📚 期刊中心", "🎯 重点关注", "🏷 专题中心", "⬇️ 导出中心", "⭐ 阅读管理", "⚙️ 系统状态"],
+        ["文献流", "今日文献", "日期检索", "期刊库", "重点期刊", "专题", "导出", "阅读队列", "数据源状态"],
         label_visibility="collapsed",
     )
 
     st.markdown('<div class="soft-divider"></div>', unsafe_allow_html=True)
     if "selected_date" not in st.session_state:
         st.session_state.selected_date = date.today()
-
-    dc1, dc2, dc3 = st.columns(3)
-    if dc1.button("← 前日", use_container_width=True):
+    date_cols = st.columns(3)
+    if date_cols[0].button("前一天", key="date_prev", use_container_width=True):
         st.session_state.selected_date = st.session_state.selected_date - timedelta(days=1)
         st.rerun()
-    if dc2.button("今天", use_container_width=True):
+    if date_cols[1].button("今天", key="date_today", use_container_width=True):
         st.session_state.selected_date = date.today()
         st.rerun()
-    if dc3.button("后日 →", use_container_width=True):
+    if date_cols[2].button("后一天", key="date_next", use_container_width=True):
         st.session_state.selected_date = st.session_state.selected_date + timedelta(days=1)
         st.rerun()
 
-    selected_date = st.date_input("选择更新日期", key="selected_date", help="按系统首次发现日期查看当天更新论文。")
-    lookback_days = st.slider("趋势统计范围", min_value=7, max_value=90, value=30, step=1)
-
-    st.markdown('<div class="soft-divider"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="sidebar-title">📚 期刊列表</div>', unsafe_allow_html=True)
+    selected_date = st.date_input("首次收录日期", key="selected_date")
+    lookback_days = st.slider("趋势范围（天）", min_value=7, max_value=90, value=30, step=1)
     selected_day_raw = load_articles(selected_date.isoformat(), selected_date.isoformat())
     day_counts_by_journal = selected_day_raw.groupby("journal_name").size().to_dict() if not selected_day_raw.empty else {}
-    journal_label_map: dict[str, str] = {"全部期刊": "全部期刊"}
-    journal_options = ["全部期刊"]
-    for name in journal_names:
-        cnt = int(day_counts_by_journal.get(name, 0))
-        label = f"{name}（{cnt}）"
-        journal_options.append(label)
-        journal_label_map[label] = name
-    selected_journal_label = st.radio("点击期刊查看更新论文", journal_options, label_visibility="collapsed")
-    selected_journal = journal_label_map.get(selected_journal_label, "全部期刊")
-
-    st.markdown('<div class="soft-divider"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="sidebar-title">🎯 重点关注期刊</div>', unsafe_allow_html=True)
-    focus_journals = st.multiselect(
-        "选择你重点关注的期刊",
-        journal_names,
-        default=st.session_state.get("focus_journals", []),
-        placeholder="输入期刊名检索并选择",
-        help="该选择只保存在当前浏览会话中，不会影响其他访问者。",
+    journal_options = ["全部期刊"] + [
+        f"{name} · {int(day_counts_by_journal.get(name, 0))} 篇"
+        for name in journal_names
+    ]
+    journal_label_map = {"全部期刊": "全部期刊"}
+    journal_label_map.update({label: label.rsplit(" · ", 1)[0] for label in journal_options[1:]})
+    selected_journal_label = st.selectbox(
+        "期刊（可输入名称搜索）", journal_options, key="selected_journal_label"
     )
-    st.session_state.focus_journals = focus_journals
-    focus_only = st.checkbox("仅显示重点关注期刊", value=False, disabled=(len(focus_journals) == 0))
+    selected_journal = journal_label_map[selected_journal_label]
 
-    st.markdown('<div class="soft-divider"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="sidebar-title">🔎 筛选器</div>', unsafe_allow_html=True)
-    priorities = []
-    all_topics = load_all_topics()
-    selected_topics = st.multiselect("专题标签", all_topics, default=[])
-    statuses = st.multiselect("阅读状态", READING_STATUS, default=[])
-    keyword = st.text_input("关键词检索", placeholder="如 hypoxia / VO2max / recovery")
-    favorites_only = st.checkbox("只看收藏", value=False)
-    topic_only = st.checkbox("只看专题命中论文", value=False)
+    with st.expander("更多筛选", expanded=False):
+        focus_journals = st.multiselect(
+            "重点期刊",
+            journal_names,
+            default=st.session_state.get("focus_journals", []),
+            placeholder="搜索并选择期刊",
+        )
+        st.session_state.focus_journals = focus_journals
+        focus_only = st.checkbox("只看重点期刊", value=False, disabled=(len(focus_journals) == 0))
+        all_topics = load_all_topics()
+        selected_topics = st.multiselect("专题标签", all_topics, default=[])
+        priorities = st.multiselect("关注等级（S/A/B/C）", ["S", "A", "B", "C"], default=[])
+        if PRIVATE_READING_MODE:
+            statuses = st.multiselect("阅读状态", READING_STATUS, default=[])
+            favorites_only = st.checkbox("只看收藏", value=False)
+        else:
+            statuses = []
+            favorites_only = False
+            st.caption("个人阅读状态仅在本机版可用。")
+        keyword = st.text_input("检索题名、摘要、作者", placeholder="如 hypoxia / VO2max / recovery")
+        topic_only = st.checkbox("只看专题命中文献", value=False)
 
-    if st.button("刷新看板缓存", use_container_width=True):
+    if st.button("刷新数据", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
@@ -1235,38 +845,32 @@ today_filtered = apply_filters(
 st.markdown(
     """
     <div class="hero">
-      <div class="hero-title">体育科学期刊更新情报平台</div>
-      <div class="hero-subtitle">面向 Sport Sciences 相关期刊的每日论文更新监控系统。页面以系统首次发现日期为每日更新口径，支持按日期、期刊、专题浏览，并提供 RIS / BibTeX / CSV 引用导出。</div>
-      <span class="hero-chip">🗓️ 日期情报</span>
-      <span class="hero-chip">🏛️ 期刊中心</span>
-      <span class="hero-chip">🧬 专题中心</span>
-      <span class="hero-chip">📥 引用导出</span>
+      <div class="hero-title">运动科学文献台</div>
+      <div class="hero-subtitle">把训练、教练、运动表现、特殊环境、营养与恢复研究放进一个可筛选的阅读流。日期按系统首次收录统计；正式发表日期单独展示。</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
-render_product_tiles()
 
-k1, k2, k3, k4, k5 = st.columns(5)
+k1, k2, k3, k4 = st.columns(4)
 with k1:
-    kpi("🆕", len(today_filtered), "今日更新", "今天首次发现并入库")
+    kpi("", len(today_filtered), "今日首次收录", "系统今天新发现")
 with k2:
-    kpi("🗓", len(display_df), "所选日期更新", selected_date.isoformat())
+    kpi("", len(display_df), "所选日期收录", selected_date.isoformat())
 with k3:
-    kpi("📚", int(display_df["journal_name"].nunique()) if not display_df.empty else 0, "覆盖期刊", "当前筛选范围")
+    kpi("", len(journals_df), "追踪期刊", "核心目录 + 跨领域扩展")
 with k4:
-    kpi("🏷", int(display_df["has_topic"].sum()) if not display_df.empty else 0, "专题命中", "基于关键词词库")
-with k5:
-    kpi("🎯", len(focus_journals), "重点关注", "当前会话自定义")
+    kpi("", int(display_df["has_topic"].sum()) if not display_df.empty else 0, "专题命中", "透明关键词筛选")
 
-focus_note = f"｜重点关注 {len(focus_journals)} 本" if focus_journals else ""
-st.caption(f"当前查看范围：{selected_date.isoformat()}｜{selected_journal}{focus_note}")
+focus_note = f" · 重点关注 {len(focus_journals)} 本" if focus_journals else ""
+st.caption(f"当前视图：{selected_date.isoformat()} · {selected_journal}{focus_note}")
 
 export_cols = [
     "first_seen_date", "publication_date", "journal_name", "priority", "title", "authors", "doi", "url",
-    "fulltext_url", "source", "pmid", "topics", "matched_keywords", "study_type", "status",
-    "favorite", "personal_tags", "user_notes", "abstract",
+    "fulltext_url", "source", "pmid", "topics", "matched_keywords", "study_type", "abstract",
 ]
+if PRIVATE_READING_MODE:
+    export_cols += ["status", "favorite", "personal_tags", "user_notes"]
 export_df = display_df[[c for c in export_cols if c in display_df.columns]].copy() if not display_df.empty else pd.DataFrame(columns=export_cols)
 
 with st.expander("⬇️ 导出当前显示结果", expanded=False):
@@ -1275,120 +879,90 @@ with st.expander("⬇️ 导出当前显示结果", expanded=False):
     d2.download_button("BibTeX", make_bibtex(display_df).encode("utf-8"), file_name=f"journal_updates_{selected_date.isoformat()}.bib", mime="text/plain", use_container_width=True)
     d3.download_button("RIS", make_ris(display_df).encode("utf-8"), file_name=f"journal_updates_{selected_date.isoformat()}.ris", mime="application/x-research-info-systems", use_container_width=True)
 
-if page == "🏠 首页总览":
-    left, right = st.columns([1.2, 1])
-    with left:
-        st.markdown('<div class="section-title">📈 每日更新趋势</div>', unsafe_allow_html=True)
-        st.markdown('<div class="section-subtitle">按系统首次发现日期统计，不含接口原始 fetched 条目。</div>', unsafe_allow_html=True)
-        if trend_filtered.empty:
-            render_empty("当前趋势范围暂无更新记录。")
-        else:
-            trend = trend_filtered.groupby("first_seen_date").size().reset_index(name="更新论文数").set_index("first_seen_date")
-            light_bar_chart(trend, x_title="更新日期", y_title="更新论文数")
-    with right:
-        st.markdown('<div class="section-title">📚 所选日期期刊更新 Top 15</div>', unsafe_allow_html=True)
-        st.markdown('<div class="section-subtitle">显示当前日期与筛选条件下更新最多的期刊。</div>', unsafe_allow_html=True)
-        if display_df.empty:
-            render_empty("所选日期暂无更新。")
-        else:
-            top_j = display_df.groupby("journal_name").size().sort_values(ascending=False).head(15)
-            light_bar_chart(top_j, x_title="期刊", y_title="更新论文数")
-
-    st.markdown('<div class="section-title">🧭 期刊活跃概览</div>', unsafe_allow_html=True)
-    render_journal_center(display_df, trend_filtered, journals_df, focus_journals=focus_journals)
-    st.markdown('<div class="section-title">📰 所选日期更新论文</div>', unsafe_allow_html=True)
-    view_mode = st.radio("展示方式", ["卡片", "按期刊", "按主题"], horizontal=True, label_visibility="collapsed")
-    if view_mode == "卡片":
-        render_article_cards(display_df, key_prefix="home_cards")
-    elif view_mode == "按期刊":
-        render_by_journal(display_df, key_prefix="home_journal")
-    else:
-        render_by_topic(display_df, key_prefix="home_topic")
-
-elif page == "📰 今日更新":
-    st.markdown(f'<div class="section-title">📰 今日更新｜{date.today().isoformat()}</div>', unsafe_allow_html=True)
-    today_view = today_filtered
-    if today_view.empty:
-        render_empty("今日暂无符合当前筛选条件的更新。")
-    else:
-        t1, t2, t3 = st.tabs(["全部卡片", "按期刊", "按主题"])
-        with t1:
-            render_article_cards(today_view, key_prefix="today_cards")
-        with t2:
-            render_by_journal(today_view, key_prefix="today_journal")
-        with t3:
-            render_by_topic(today_view, key_prefix="today_topic")
-
-elif page == "🗓 日期检索":
-    st.markdown(f'<div class="section-title">🗓 {selected_date.isoformat()} 更新论文</div>', unsafe_allow_html=True)
-    st.caption("这里严格按 first_seen_date 统计，也就是系统首次发现并入库的日期。")
-    t1, t2, t3 = st.tabs(["全部卡片", "按期刊", "按主题"])
+if page == "文献流":
+    st.markdown('<div class="section-title">所选日期的文献</div>', unsafe_allow_html=True)
+    t1, t2, t3 = st.tabs(["阅读列表", "按期刊", "按专题"])
     with t1:
-        render_article_cards(display_df, key_prefix="date_cards")
+        render_article_cards(display_df, key_prefix="stream_cards")
     with t2:
-        render_by_journal(display_df, key_prefix="date_journal")
+        render_by_journal(display_df, key_prefix="stream_journal")
     with t3:
-        render_by_topic(display_df, key_prefix="date_topic")
-
-elif page == "📚 期刊中心":
-    render_journal_center(display_df, trend_filtered, journals_df, focus_journals=focus_journals)
-    st.markdown('<div class="section-title">📚 当前选择期刊的更新论文</div>', unsafe_allow_html=True)
-    if selected_journal == "全部期刊":
-        st.info("可在左侧点击具体期刊，查看单本期刊在所选日期的更新论文。")
-        render_by_journal(display_df, key_prefix="journal_center_all")
+        render_by_topic(display_df, key_prefix="stream_topic")
+    with st.expander("查看近期更新趋势", expanded=False):
+        if trend_filtered.empty:
+            render_empty("当前范围暂无趋势数据。")
+        else:
+            trend = trend_filtered.groupby("first_seen_date").size().reset_index(name="入库记录数").set_index("first_seen_date")
+            light_bar_chart(trend, x_title="首次收录日期", y_title="新增记录")
+elif page == "今日文献":
+    st.markdown(f'<div class="section-title">今日首次收录 · {date.today().isoformat()}</div>', unsafe_allow_html=True)
+    render_article_cards(today_filtered, key_prefix="today_cards")
+elif page == "日期检索":
+    st.markdown(f'<div class="section-title">首次收录于 {selected_date.isoformat()} 的文献</div>', unsafe_allow_html=True)
+    st.caption("首次收录日期表示系统第一次抓到该记录，不等同于期刊正式发表日期。")
+    render_article_cards(display_df, key_prefix="date_cards")
+elif page == "期刊库":
+    render_journal_library(journals_df)
+    if selected_journal != "全部期刊":
+        selected_journal_articles = display_df[display_df["journal_name"] == selected_journal] if not display_df.empty else display_df
+        st.markdown(f'<div class="section-title">{esc(selected_journal)} · {selected_date.isoformat()}</div>', unsafe_allow_html=True)
+        render_article_cards(selected_journal_articles, key_prefix="journal_library_articles")
+elif page == "重点期刊":
+    if not focus_journals:
+        render_empty("在左侧筛选中选择需要重点关注的期刊。")
     else:
-        render_article_cards(display_df, key_prefix="journal_center_cards")
-
-elif page == "🎯 重点关注":
-    render_focus_center(selected_raw, trend_raw, journals_df, focus_journals)
-
-elif page == "🏷 专题中心":
+        focus_rows = journals_df[journals_df["journal_name"].isin(focus_journals)]
+        render_journal_library(focus_rows)
+        focus_articles = display_df[display_df["journal_name"].isin(focus_journals)] if not display_df.empty else display_df
+        render_article_cards(focus_articles, key_prefix="focus_articles")
+elif page == "专题":
     render_topic_center(display_df, trend_filtered)
-    st.markdown(f'<div class="section-title">🏷 {selected_date.isoformat()} 专题论文</div>', unsafe_allow_html=True)
-    if display_df.empty:
-        render_empty("当前条件下暂无更新论文。")
-    else:
-        render_by_topic(display_df, key_prefix="topic_center")
-
-elif page == "⬇️ 导出中心":
+    st.markdown(f'<div class="section-title">{selected_date.isoformat()} 专题文献</div>', unsafe_allow_html=True)
+    render_by_topic(display_df, key_prefix="topic_center")
+elif page == "导出":
     render_export_center(display_df, selected_date)
-    st.markdown('<div class="section-title">📦 当前可导出论文预览</div>', unsafe_allow_html=True)
-    if display_df.empty:
-        render_empty("当前筛选条件下暂无可导出论文。")
+    st.markdown('<div class="section-title">当前筛选的记录</div>', unsafe_allow_html=True)
+    preview_cols = [c for c in ["publication_date", "journal_name", "title", "doi", "pmid", "topics"] if c in display_df.columns]
+    st.dataframe(display_df[preview_cols].head(100), use_container_width=True, hide_index=True)
+elif page == "阅读队列":
+    st.markdown('<div class="section-title">本机阅读队列</div>', unsafe_allow_html=True)
+    if not PRIVATE_READING_MODE:
+        st.info("公开看板不保存个人阅读信息。运行本机版后，可在每篇文献的详情中保存状态、收藏与备注。")
     else:
-        st.dataframe(display_df[["first_seen_date", "publication_date", "journal_name", "title", "doi", "pmid", "topics"]], use_container_width=True, hide_index=True)
-
-elif page == "⭐ 阅读管理":
-    st.markdown('<div class="section-title">⭐ 收藏 / 待读 / 精读管理</div>', unsafe_allow_html=True)
-    st.caption("公开部署版中，阅读状态、收藏和备注属于公共字段；多人使用时建议谨慎修改。")
-    read_df = trend_raw[(trend_raw["favorite"] == 1) | (trend_raw["status"].isin(["待读", "阅读中", "精读", "已引用"]))].copy()
-    read_df = apply_filters(read_df, selected_journal=selected_journal, priorities=priorities, statuses=statuses, topics=selected_topics, keyword=keyword, favorites_only=False, topic_only=False, focus_journals=focus_journals, focus_only=focus_only)
-    if read_df.empty:
-        render_empty("当前趋势范围内还没有收藏或待读/精读论文。")
-    else:
-        st.dataframe(read_df[["first_seen_date", "status", "favorite", "journal_name", "title", "topics", "personal_tags", "user_notes", "doi", "fulltext_url"]], use_container_width=True, hide_index=True)
-        st.download_button("导出阅读管理清单 CSV", read_df.to_csv(index=False).encode("utf-8-sig"), file_name="journal_tracker_reading_list.csv", mime="text/csv")
-
-elif page == "⚙️ 系统状态":
-    st.markdown('<div class="section-title">⚙️ 系统状态</div>', unsafe_allow_html=True)
-    st.caption("此页仅用于排查运行问题，不展示 fetched 次数。日常展示建议使用『首页总览』或『日期检索』。")
-    st.info(f"最近运行时间：{load_last_run_time() or '暂无运行记录'}")
+        read_df = trend_raw[(trend_raw["favorite"] == 1) | (trend_raw["status"].isin(["待读", "阅读中", "精读", "已引用"]))].copy()
+        read_df = apply_filters(read_df, selected_journal=selected_journal, priorities=priorities, statuses=statuses, topics=selected_topics, keyword=keyword, favorites_only=False, topic_only=False, focus_journals=focus_journals, focus_only=focus_only)
+        if read_df.empty:
+            render_empty("当前趋势范围内还没有收藏或待读/精读文献。")
+        else:
+            read_cols = [c for c in ["first_seen_date", "status", "favorite", "journal_name", "title", "topics", "personal_tags", "user_notes", "doi", "fulltext_url"] if c in read_df.columns]
+            st.dataframe(read_df[read_cols], use_container_width=True, hide_index=True)
+            st.download_button("导出阅读队列 CSV", read_df[read_cols].to_csv(index=False).encode("utf-8-sig"), file_name="journal_tracker_reading_list.csv", mime="text/csv")
+elif page == "数据源状态":
+    st.markdown('<div class="section-title">目录覆盖与数据源</div>', unsafe_allow_html=True)
+    registry = load_registry()
+    verified_names = set(registry.loc[registry.get("official_source_verified", pd.Series(index=registry.index, dtype=str)).astype(str).str.casefold().isin(["yes", "true", "1"]), "journal_name"].astype(str)) if not registry.empty else set()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("目录期刊", len(journals_df))
+    c2.metric("已核验出版社源", len(verified_names))
+    c3.metric("待核验来源", max(0, len(journals_df) - len(verified_names)))
+    st.caption("新增扩展期刊先通过 Crossref / PubMed 按刊检索；出版社 RSS 或 API 仍需逐刊验证。")
+    st.info(f"最近抓取记录：{load_last_run_time() or '暂无'}")
+    if not registry.empty:
+        view_cols = [c for c in ["journal_name", "collection_group", "coverage_status", "official_source_verified", "next_action"] if c in registry.columns]
+        st.dataframe(registry[view_cols], use_container_width=True, hide_index=True)
     errors = load_recent_errors(120)
     if errors.empty:
-        st.success("最近未记录接口错误。")
+        st.success("最近没有记录到抓取失败。")
     else:
-        today_errors = errors[errors["run_date"] == date.today().isoformat()]
-        if not today_errors.empty:
-            st.warning(f"今日有 {len(today_errors)} 条接口错误记录，可能由网络或接口临时波动导致。")
+        st.warning(f"最近有 {len(errors)} 条抓取失败记录。")
         st.dataframe(errors, use_container_width=True, hide_index=True)
     log_path = ROOT / "logs" / "daily_run.log"
     with st.expander("查看本地日志末尾", expanded=False):
         if log_path.exists():
-            text = log_path.read_text(encoding="utf-8", errors="ignore")[-6000:]
-            st.text_area("daily_run.log", text, height=260)
+            log_text = log_path.read_text(encoding="utf-8", errors="ignore")[-6000:]
+            st.text_area("daily_run.log", log_text, height=260)
         else:
-            st.info("尚未发现 logs/daily_run.log。")
-
+            st.caption("此部署未提供本地运行日志。")
 
 with st.expander("专题词库说明", expanded=False):
     topic_path = CONFIG_DIR / "topic_keywords.json"

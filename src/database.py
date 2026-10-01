@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS journals (
     crossref_query TEXT DEFAULT '',
     pubmed_query TEXT DEFAULT '',
     notes TEXT DEFAULT '',
+    collection_group TEXT DEFAULT '',
+    collection_mode TEXT DEFAULT 'journal_all',
+    scope_keywords TEXT DEFAULT '',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -99,6 +102,11 @@ ARTICLE_EXTRA_COLUMNS: dict[str, str] = {
 RUN_LOG_EXTRA_COLUMNS: dict[str, str] = {
     "retry_count": "INTEGER DEFAULT 0",
 }
+JOURNAL_EXTRA_COLUMNS: dict[str, str] = {
+    "collection_group": "TEXT DEFAULT ''",
+    "collection_mode": "TEXT DEFAULT 'journal_all'",
+    "scope_keywords": "TEXT DEFAULT ''",
+}
 
 
 def connect(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
@@ -124,6 +132,8 @@ def migrate_db(con: sqlite3.Connection) -> None:
         _add_column_if_missing(con, "articles", col, ddl)
     for col, ddl in RUN_LOG_EXTRA_COLUMNS.items():
         _add_column_if_missing(con, "run_log", col, ddl)
+    for col, ddl in JOURNAL_EXTRA_COLUMNS.items():
+        _add_column_if_missing(con, "journals", col, ddl)
     # Normalize old English statuses to the Chinese labels used in v4.
     con.execute("UPDATE articles SET status='未读' WHERE status IS NULL OR status='' OR status='unread'")
     con.execute("UPDATE articles SET status='待读' WHERE status='to_read'")
@@ -146,8 +156,9 @@ def upsert_journal(con: sqlite3.Connection, row: dict[str, Any]) -> None:
         """
         INSERT INTO journals (
             journal_name, issn, eissn, priority, domain, frequency, active,
-            rss_url, crossref_query, pubmed_query, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            rss_url, crossref_query, pubmed_query, notes, collection_group,
+            collection_mode, scope_keywords
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(journal_name) DO UPDATE SET
             issn=excluded.issn,
             eissn=excluded.eissn,
@@ -159,6 +170,9 @@ def upsert_journal(con: sqlite3.Connection, row: dict[str, Any]) -> None:
             crossref_query=excluded.crossref_query,
             pubmed_query=excluded.pubmed_query,
             notes=excluded.notes,
+            collection_group=excluded.collection_group,
+            collection_mode=excluded.collection_mode,
+            scope_keywords=excluded.scope_keywords,
             updated_at=CURRENT_TIMESTAMP
         """,
         (
@@ -173,6 +187,9 @@ def upsert_journal(con: sqlite3.Connection, row: dict[str, Any]) -> None:
             row.get("crossref_query", "") or row.get("journal_name", ""),
             row.get("pubmed_query", ""),
             row.get("notes", ""),
+            row.get("collection_group", ""),
+            row.get("collection_mode", "journal_all") or "journal_all",
+            row.get("scope_keywords", ""),
         ),
     )
 

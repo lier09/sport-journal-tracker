@@ -19,6 +19,13 @@ load_dotenv(ROOT / ".env")
 def load_journals(path: Path | None = None) -> pd.DataFrame:
     path = path or CONFIG_DIR / "journals.csv"
     df = pd.read_csv(path).fillna("")
+    expansion_path = CONFIG_DIR / "journal_expansion.csv"
+    if expansion_path.exists():
+        expanded = pd.read_csv(expansion_path).fillna("")
+        df = pd.concat([df, expanded], ignore_index=True, sort=False)
+        # Keep the base catalogue authoritative if a title appears in both files.
+        normalized_names = df["journal_name"].astype(str).str.casefold().str.replace(r"[^a-z0-9]", "", regex=True)
+        df = df.loc[~normalized_names.duplicated(keep="first")].copy()
     required = {"journal_name", "priority", "domain", "frequency", "active"}
     missing = required - set(df.columns)
     if missing:

@@ -17,14 +17,39 @@ def _yes(value: str) -> bool:
 
 
 def load_registry() -> pd.DataFrame:
-    if REGISTRY_PATH.exists():
-        return pd.read_csv(REGISTRY_PATH).fillna("")
     journals = load_journals().fillna("")
-    return pd.DataFrame({
-        "journal_name": journals["journal_name"],
-        "coverage_status": "missing_registry",
-        "official_source_verified": "no",
-    })
+    if REGISTRY_PATH.exists():
+        registry = pd.read_csv(REGISTRY_PATH).fillna("")
+    else:
+        registry = pd.DataFrame(columns=["journal_name", "coverage_status", "official_source_verified"])
+
+    known = set(registry.get("journal_name", pd.Series(dtype=str)).astype(str).str.casefold())
+    additions = []
+    for _, journal in journals.iterrows():
+        name = str(journal.get("journal_name", ""))
+        if name.casefold() in known:
+            continue
+        additions.append({
+            "journal_name": name,
+            "issn": journal.get("issn", ""),
+            "eissn": journal.get("eissn", ""),
+            "collection_group": journal.get("collection_group", ""),
+            "collection_mode": journal.get("collection_mode", "journal_all"),
+            "coverage_status": "database_fallback_only",
+            "official_source_type": "",
+            "official_source_url": "",
+            "official_source_verified": "no",
+            "rss_url": "",
+            "crossref_query": journal.get("crossref_query", name),
+            "pubmed_query": journal.get("pubmed_query", ""),
+            "fallback_sources": "crossref;pubmed",
+            "next_action": "verify_official_rss_or_publisher_api",
+            "notes": "Expanded catalogue entry; Crossref ISSN fields use exact-title registry matches where available. Publisher feed is not yet verified.",
+        })
+        known.add(name.casefold())
+    if additions:
+        registry = pd.concat([registry, pd.DataFrame(additions)], ignore_index=True, sort=False).fillna("")
+    return registry
 
 
 def load_publisher_sources() -> pd.DataFrame:

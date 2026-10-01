@@ -20,6 +20,18 @@ from .normalization import today_iso
 Fetcher = Callable[..., list[dict]]
 
 
+def article_in_scope(article: dict, journal: dict) -> bool:
+    """Filter broad adjacent journals to sport/exercise-relevant records."""
+    mode = str(journal.get("collection_mode", "journal_all") or "journal_all").strip().lower()
+    if mode != "keyword_filter":
+        return True
+    terms = [x.strip().casefold() for x in str(journal.get("scope_keywords", "") or "").split("|") if x.strip()]
+    if not terms:
+        return False
+    haystack = " ".join((str(article.get("title", "")), str(article.get("abstract", "")))).casefold()
+    return any(term in haystack for term in terms)
+
+
 def sync_journals() -> None:
     init_db(DB_PATH)
     df = load_journals()
@@ -68,6 +80,10 @@ def run_daily(days_back: int = 7, sources: list[str] | None = None) -> None:
                         articles = fetchers[source](journal, from_date=from_date, until_date=until_date)
                     inserted = 0
                     for article in articles:
+                        # Normalize source-provided casing/abbreviations to the catalogue title.
+                        article["journal_name"] = journal_name
+                        if not article_in_scope(article, journal):
+                            continue
                         enriched = classify_article(article, topics)
                         if insert_article(con, enriched):
                             inserted += 1
